@@ -31,7 +31,15 @@ open "build/Build/Products/Debug/Infinity Flow.app"
 On first launch, allow **Microphone**, **Speech Recognition**, and **Accessibility**. If you use fn, set
 System Settings › Keyboard › "Press 🌐 key to" to "Do Nothing".
 
-Development builds are ad-hoc signed, so macOS may ask for Accessibility again after you rebuild.
+For daily use, build with your own Apple Development certificate so macOS keeps the Accessibility permission across
+rebuilds (ad-hoc builds lose it every time):
+
+```bash
+SIGN_IDENTITY="Apple Development: Your Name (XXXXXXXXXX)" TEAM_ID=ABCDE12345 ./scripts/run.sh
+```
+
+If Accessibility is switched on but Infinity Flow still asks for it, reset the stale entry and allow it again:
+`tccutil reset Accessibility com.oneinfinitylabs.InfinityFlow`.
 
 ## Layout
 
