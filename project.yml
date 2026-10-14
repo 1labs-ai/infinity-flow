@@ -1,0 +1,50 @@
+name: InfinityFlow
+options:
+  bundleIdPrefix: com.oneinfinitylabs
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+targets:
+  InfinityFlow:
+    type: application
+    platform: macOS
+    sources: [Sources]
+    settings:
+      base:
+        PRODUCT_NAME: Infinity Flow
+        PRODUCT_MODULE_NAME: InfinityFlow
+        PRODUCT_BUNDLE_IDENTIFIER: com.oneinfinitylabs.InfinityFlow
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Infinity Flow
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Infinity Flow listens while you hold the hotkey and turns your speech into text.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Infinity Flow uses on-device speech recognition to transcribe what you say.
+        ENABLE_HARDENED_RUNTIME: NO
+  InfinityFlowTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests]
+    dependencies:
+      - target: InfinityFlow
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        # The product name contains a space, so the default test host path doesn't resolve.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Infinity Flow.app/Contents/MacOS/Infinity Flow"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  InfinityFlow:
+    build:
+      targets:
+        InfinityFlow: all
+    test:
+      targets: [InfinityFlowTests]
