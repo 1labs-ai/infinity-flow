@@ -8,7 +8,7 @@
 set -e
 cd "$(dirname "$0")/.."
 : "${SIGN_IDENTITY:?Set SIGN_IDENTITY to an Apple Development certificate name}"
-: "${TEAM_ID:?Set TEAM_ID to that certificate's team (the OU field)}"
+: "${TEAM_ID:?Set TEAM_ID to the team ID of that certificate (its OU field)}"
 xcodegen generate >/dev/null
 pkill -f 'Infinity Flow.app/Contents/MacOS' || true
 xcodebuild -project InfinityFlow.xcodeproj -scheme InfinityFlow -derivedDataPath build -destination 'platform=macOS' \

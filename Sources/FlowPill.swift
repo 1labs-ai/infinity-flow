@@ -9,7 +9,7 @@ final class FlowPillController {
 
     init(controller: FlowController) {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 64),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 64),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true)

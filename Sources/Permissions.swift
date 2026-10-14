@@ -36,33 +36,32 @@ enum Permissions {
     }
 }
 
-/// Stores the OpenAI API key in the login keychain.
+/// Stores API keys in the login keychain, one per cloud provider.
 enum APIKeyStore {
     private static let service = "com.oneinfinitylabs.InfinityFlow"
-    private static let account = "openai"
 
-    static func read() -> String? {
-        let query: [String: Any] = [
+    private static func query(_ account: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
         ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
     }
 
-    static func save(_ value: String) {
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(base as CFDictionary)
+    static func read(provider: String) -> String? {
+        var query = query(provider)
+        query[kSecReturnData as String] = true
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
+        let key = String(data: data, encoding: .utf8)
+        return key?.isEmpty == false ? key : nil
+    }
+
+    static func save(_ value: String, provider: String) {
+        SecItemDelete(query(provider) as CFDictionary)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var add = base
+        var add = query(provider)
         add[kSecValueData as String] = Data(trimmed.utf8)
         SecItemAdd(add as CFDictionary, nil)
     }

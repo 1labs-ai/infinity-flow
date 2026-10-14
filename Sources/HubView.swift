@@ -62,6 +62,10 @@ struct HomeView: View {
                     Stat(value: "\(transcripts.count)", label: "Dictations")
                     Stat(value: minutes < 1 ? "<1" : String(format: "%.0f", minutes), label: "Minutes spoken")
                 }
+                PrivacyReceipt(records: transcripts.map(\.usage))
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(.quaternary.opacity(0.5)))
                 if !controller.accessibilityGranted || !Permissions.microphoneGranted {
                     SetupCard()
                 }
@@ -103,7 +107,7 @@ private struct SetupCard: View {
 }
 
 struct HistoryView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(FlowController.self) private var controller
     @Query(sort: \Transcript.createdAt, order: .reverse) private var transcripts: [Transcript]
     @State private var search = ""
     @State private var pendingDelete: Transcript?
@@ -118,11 +122,7 @@ struct HistoryView: View {
             ForEach(DateSection.group(filtered, date: \.createdAt, now: .now), id: \.0) { section, items in
                 Section(section.title) {
                     ForEach(items) { transcript in
-                        TranscriptRow(transcript: transcript)
-                            .contextMenu {
-                                Button("Copy transcript") { copy(transcript.text) }
-                                Button("Delete transcript", role: .destructive) { pendingDelete = transcript }
-                            }
+                        TranscriptRow(transcript: transcript, onDelete: { pendingDelete = transcript })
                     }
                 }
             }
@@ -140,34 +140,99 @@ struct HistoryView: View {
         .confirmationDialog("Are you sure you want to delete this transcript?",
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { transcript in
-            Button("Yes, delete it", role: .destructive) { context.delete(transcript) }
+            Button("Yes, delete it", role: .destructive) { controller.delete(transcript) }
         } message: { _ in
-            Text("Once deleted it cannot be recovered.")
+            Text("The text and its recording will be deleted. Once deleted it cannot be recovered.")
         }
         .searchable(text: $search, prompt: "Search past transcripts")
         .navigationTitle("History")
-    }
-
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        .onDisappear { AudioPlayback.shared.stop() }
     }
 }
 
 private struct TranscriptRow: View {
+    @Environment(FlowController.self) private var controller
     let transcript: Transcript
+    let onDelete: () -> Void
+    @State private var showOriginal = false
+    @State private var retrying = false
+    @State private var hovering = false
+
+    private var playback: AudioPlayback { .shared }
+    private var hasAudio: Bool { transcript.audioURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(transcript.text).textSelection(.enabled)
-            HStack(spacing: 8) {
-                Text(transcript.createdAt.formatted(date: .omitted, time: .shortened))
-                if let app = transcript.appName { Text("·"); Text(app) }
-                Text("·")
-                Text(transcript.engineTitle)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                if transcript.isFailed {
+                    Label("Couldn't transcribe: \(transcript.errorMessage ?? "unknown error")", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                } else {
+                    Text(showOriginal ? (transcript.rawText ?? transcript.text) : transcript.text)
+                        .textSelection(.enabled)
+                }
+                HStack(spacing: 8) {
+                    Text(transcript.createdAt.formatted(date: .omitted, time: .shortened))
+                    if let app = transcript.appName { Text("·"); Text(app) }
+                    Text("·")
+                    Text(transcript.engineTitle)
+                    if transcript.duration > 0 { Text("·"); Text(Duration.seconds(transcript.duration).formatted(.time(pattern: .minuteSecond))) }
+                    if transcript.rawText != nil {
+                        Button(showOriginal ? "Show cleaned" : "Show original") { showOriginal.toggle() }
+                            .buttonStyle(.link)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
-            .font(.caption).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                if transcript.isFailed {
+                    Button(retrying ? "Retrying…" : "Retry") { retry() }.disabled(retrying || !hasAudio)
+                }
+                if hasAudio {
+                    let playing = playback.playingID == transcript.uuid
+                    rowButton(playing ? "stop.fill" : "play.fill", help: playing ? "Pause audio" : "Play audio") {
+                        playback.toggle(transcript)
+                    }
+                }
+                if !transcript.isFailed {
+                    rowButton("doc.on.doc", help: "Copy transcript") { TextInserter.write(transcript.text) }
+                }
+                Menu {
+                    if hasAudio, let url = transcript.audioURL {
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        Button("Transcribe again") { retry() }
+                        Button("Delete audio") { controller.deleteAudio(transcript) }
+                        Divider()
+                    }
+                    Button("Delete transcript", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More")
+            }
+            .opacity(hovering || playback.playingID == transcript.uuid || transcript.isFailed ? 1 : 0.35)
         }
         .padding(.vertical, 4)
+        .onHover { hovering = $0 }
+    }
+
+    private func rowButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 26, height: 22)
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+    }
+
+    private func retry() {
+        retrying = true
+        Task {
+            await controller.retry(transcript)
+            retrying = false
+        }
     }
 }
