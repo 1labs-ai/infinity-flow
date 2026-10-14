@@ -40,6 +40,7 @@ We read user reviews and comments about popular AI dictation apps and built Infi
 - **History:** searchable and grouped by day. Each entry shows the app, engine and duration. Play the recording, copy the text, see the original before cleanup, transcribe again, or retry a failed dictation.
 - **Recordings:** saved as WAV files on your Mac, kept forever or for 30 or 7 days. Open the folder, or delete one recording or all of them.
 - **Privacy receipt** and a **monthly cost meter** for your cloud key.
+- **Dock or menu bar:** shows in the Dock by default; turn that off in Settings to keep it in the menu bar only.
 
 ## Bring your own key
 

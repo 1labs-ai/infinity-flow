@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct InfinityFlowApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = FlowController()
 
     var body: some Scene {
@@ -19,6 +20,22 @@ struct InfinityFlowApp: App {
         } label: {
             Image(systemName: controller.state == .listening ? "waveform.circle.fill" : "waveform")
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: [SettingsKey.showInDock: true])
+        DockIcon.apply()
+    }
+}
+
+/// Shows the app in the Dock (default), or only in the menu bar.
+enum DockIcon {
+    static func apply() {
+        let show = UserDefaults.standard.bool(forKey: SettingsKey.showInDock)
+        NSApp.setActivationPolicy(show ? .regular : .accessory)
+        if show { NSApp.activate() }
     }
 }
 

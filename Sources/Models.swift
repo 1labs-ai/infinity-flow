@@ -127,4 +127,5 @@ enum SettingsKey {
     static let onboarded = "onboarded"
     static let keepRecordings = "keepRecordings"
     static let recordingRetention = "recordingRetention"
+    static let showInDock = "showInDock"
 }

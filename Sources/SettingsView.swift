@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.cleanupModel) private var cleanupModel = ""
     @AppStorage(SettingsKey.playSounds) private var playSounds = true
     @AppStorage(SettingsKey.restoreClipboard) private var restoreClipboard = true
+    @AppStorage(SettingsKey.showInDock) private var showInDock = true
     @Query private var transcripts: [Transcript]
     @State private var apiKey = ""
     @State private var testResult: String?
@@ -37,6 +38,10 @@ struct SettingsView: View {
                 }
                 Toggle("Dictation and notification sounds", isOn: $playSounds)
                 Toggle("Restore my clipboard after pasting", isOn: $restoreClipboard)
+                Toggle("Show Infinity Flow in the Dock", isOn: $showInDock)
+                    .onChange(of: showInDock) { DockIcon.apply() }
+                Text("When off, Infinity Flow lives only in the menu bar (the waveform icon).")
+                    .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
