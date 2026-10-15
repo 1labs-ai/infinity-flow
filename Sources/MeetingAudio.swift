@@ -221,35 +221,47 @@ final class MeetingMicrophone {
 
     func start(echoCancellation: Bool) throws {
         self.echoCancellation = echoCancellation
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        cancelsEcho = false
-        if echoCancellation {
-            do {
-                try input.setVoiceProcessingEnabled(true)
-                input.voiceProcessingOtherAudioDuckingConfiguration =
-                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
-                cancelsEcho = true
-            } catch {
-                cancelsEcho = false
-            }
+        // Voice processing often can't start while another app (the call) holds the mic or the output device:
+        // it fails with -10875. Notes without echo cancellation beat no notes, so fall back to the plain mic.
+        if echoCancellation, let engine = try? makeEngine(voiceProcessing: true) {
+            self.engine = engine
+            cancelsEcho = true
+        } else {
+            engine = try makeEngine(voiceProcessing: false)
+            cancelsEcho = false
         }
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw FlowError.noMicrophone }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            self?.onBuffer?(buffer)
-        }
-        // Voice processing runs input and output as one unit, so the output side must be part of the graph.
-        if cancelsEcho { _ = engine.mainMixerNode }
-        engine.prepare()
-        try engine.start()
-        self.engine = engine
         startedAt = .now
         // A new default microphone or headset changes the input format; restart on the new device.
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             self?.restart()
         }
+    }
+
+    private func makeEngine(voiceProcessing: Bool) throws -> AVAudioEngine {
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        if voiceProcessing {
+            try input.setVoiceProcessingEnabled(true)
+            input.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+            // Voice processing runs input and output as one unit, so the output side must be part of the graph.
+            _ = engine.mainMixerNode
+        }
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw FlowError.noMicrophone }
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            self?.onBuffer?(buffer)
+        }
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            if voiceProcessing { try? input.setVoiceProcessingEnabled(false) }
+            throw error
+        }
+        return engine
     }
 
     func stop() {

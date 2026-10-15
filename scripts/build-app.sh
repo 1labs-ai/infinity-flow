@@ -1,10 +1,14 @@
 #!/bin/bash
 # Builds Infinity Flow.app with the Command Line Tools only (no Xcode) and opens it.
 #
-# Usage: ./scripts/build-app.sh            # release build, ad-hoc signed, then opens the app
+# Usage: ./scripts/build-app.sh            # release build, then opens the app
 #        SIGN_IDENTITY="Apple Development: Your Name (XXXXXXXXXX)" ./scripts/build-app.sh
 #        NO_OPEN=1 CONFIG=debug ./scripts/build-app.sh
-# Ad-hoc builds change identity on every build, so macOS asks for Accessibility again; a certificate keeps it.
+#
+# macOS remembers permissions (microphone, Accessibility, System Audio Recording) by the app's signature.
+# An ad-hoc signature changes on every build, so every rebuild would ask again. Without SIGN_IDENTITY, the
+# script signs with a local self-signed certificate it creates once, in its own keychain (your login keychain
+# is not touched), so permissions survive rebuilds.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG="${CONFIG:-release}"
@@ -54,7 +58,31 @@ set_key LSMinimumSystemVersion string 15.0
 set_key LSApplicationCategoryType string public.app-category.productivity
 set_key NSHighResolutionCapable bool true
 
-codesign --force --sign "${SIGN_IDENTITY:--}" "$APP"
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  codesign --force --sign "$SIGN_IDENTITY" "$APP"
+else
+  SIGNING="$HOME/Library/Application Support/InfinityFlow/Signing"
+  KEYCHAIN="$SIGNING/signing.keychain-db"
+  LOCAL_ID="Infinity Flow Local Signing"
+  if [ ! -f "$KEYCHAIN" ]; then
+    echo "Creating a local signing certificate (once)…"
+    mkdir -p "$SIGNING" && chmod 700 "$SIGNING"
+    openssl rand -hex 24 > "$SIGNING/password" && chmod 600 "$SIGNING/password"
+    WORK="$(mktemp -d)"
+    printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=%s\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' "$LOCAL_ID" > "$WORK/cert.cnf"
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$WORK/key.pem" -out "$WORK/cert.pem" -days 3650 -config "$WORK/cert.cnf" 2>/dev/null
+    openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -out "$WORK/id.p12" -passout pass:import -legacy 2>/dev/null \
+      || openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -out "$WORK/id.p12" -passout pass:import
+    security create-keychain -p "$(cat "$SIGNING/password")" "$KEYCHAIN"
+    security set-keychain-settings "$KEYCHAIN"
+    security unlock-keychain -p "$(cat "$SIGNING/password")" "$KEYCHAIN"
+    security import "$WORK/id.p12" -k "$KEYCHAIN" -P import -T /usr/bin/codesign >/dev/null
+    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(cat "$SIGNING/password")" "$KEYCHAIN" >/dev/null
+    rm -f "$WORK/key.pem" "$WORK/id.p12"
+  fi
+  security unlock-keychain -p "$(cat "$SIGNING/password")" "$KEYCHAIN"
+  codesign --force --keychain "$KEYCHAIN" --sign "$LOCAL_ID" "$APP"
+fi
 echo "Built $APP"
 if [ -z "${NO_OPEN:-}" ]; then
   pkill -f "$NAME.app/Contents/MacOS" || true

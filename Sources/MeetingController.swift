@@ -47,6 +47,8 @@ final class MeetingController {
     @ObservationIgnored private var warnedAboutLength = false
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
+    /// A stop this soon after starting is taken as part of the click that started the meeting.
+    static let stopGuard: TimeInterval = 2
     /// After a call app stops using the mic for this long, the call is over.
     static let callEndGrace: TimeInterval = 15
     /// A call app must use the mic this long before Infinity Flow offers to take notes.
@@ -169,6 +171,8 @@ final class MeetingController {
     /// Stops recording, transcribes what's left and writes the notes. `reason` is shown when the stop wasn't yours.
     func stop(reason: String? = nil) {
         guard isRecording, let meeting = current else { return }
+        // Start turns into Stop under the pointer; the end of the same click must not end the meeting.
+        if reason == nil, clock.elapsed() < Self.stopGuard { return }
         phase = .finishing
         microphone?.stop()
         systemAudio?.stop()
@@ -322,6 +326,7 @@ final class MeetingController {
             meeting.status = MeetingStatus.done.rawValue
             try? context.save()
         }
+        removeEcho(in: meeting)
         let lines = meeting.transcriptLines
         guard !lines.isEmpty || !meeting.userNotes.trimmed.isEmpty else {
             meeting.notesError = (meeting.segments ?? []).contains(where: \.isFailed)
@@ -346,6 +351,18 @@ final class MeetingController {
             if !NSApp.isActive { show(notice: "Your notes for “\(meeting.title)” are ready.", meeting: meeting.uuid, duration: 8) }
         } catch {
             meeting.notesError = "Couldn't write notes: \(error.localizedDescription)"
+        }
+    }
+
+    /// Drops "You" parts that only repeat the call, heard through the speakers. The audio is kept.
+    private func removeEcho(in meeting: Meeting) {
+        let done = (meeting.segments ?? []).filter { $0.isDone && !$0.text.isEmpty }
+        let theirs = done.filter { $0.meetingSpeaker == .others }
+        for mine in done where mine.meetingSpeaker == .you {
+            let overlapping = theirs.filter {
+                EchoFilter.overlaps(start: mine.start, end: mine.start + mine.duration, with: ($0.start, $0.start + $0.duration))
+            }
+            if EchoFilter.isEcho(mine.text, theirs: overlapping.map(\.text)) { mine.text = "" }
         }
     }
 

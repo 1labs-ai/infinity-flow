@@ -12,8 +12,9 @@ struct InfinityFlowApp: App {
             HubView()
                 .environment(controller)
                 .environment(meetings)
-                .frame(minWidth: 760, minHeight: 500)
+                .frame(minWidth: 920, minHeight: 620)
         }
+        .windowStyle(.hiddenTitleBar)
         .modelContainer(controller.container)
         .windowResizability(.contentMinSize)
 

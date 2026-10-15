@@ -207,6 +207,9 @@ struct MeetingNotes: Equatable {
             if let dot = text.firstIndex(of: "."), text[..<dot].allSatisfy(\.isNumber), !text[..<dot].isEmpty {
                 text = String(text[text.index(after: dot)...]).trimmed
             }
+            for suffix in [" - None", " – None", " (None)", " - N/A"] where text.hasSuffix(suffix) {
+                text = String(text.dropLast(suffix.count)).trimmed
+            }
             let lowered = text.lowercased().trimmingCharacters(in: .punctuationCharacters)
             return text.isEmpty || lowered == "none" || lowered == "n/a" ? nil : text
         }
@@ -231,6 +234,23 @@ struct MeetingNotes: Equatable {
         }
         if !current.isEmpty { pieces.append(current) }
         return pieces
+    }
+}
+
+/// Without echo cancellation (it can't always start), a mic near speakers also hears the call. Such a "You" part
+/// repeats what "Others" said at the same moment; it is dropped from the transcript.
+enum EchoFilter {
+    /// True when most of `mine`'s words were said by others in overlapping parts.
+    static func isEcho(_ mine: String, theirs: [String]) -> Bool {
+        let words = MeetingContext.keywords(mine)
+        guard words.count >= 3 else { return false }
+        let heard = theirs.reduce(into: Set<String>()) { $0.formUnion(MeetingContext.keywords($1)) }
+        return Double(words.intersection(heard).count) / Double(words.count) >= 0.6
+    }
+
+    /// Others' parts that overlap a part spanning `start..<end`, with a little slack for chunk boundaries.
+    static func overlaps(start: Double, end: Double, with other: (start: Double, end: Double)) -> Bool {
+        other.start < end + 2 && other.end > start - 2
     }
 }
 

@@ -85,8 +85,10 @@ With only the Command Line Tools (`xcode-select --install`):
 ./scripts/build-app.sh
 ```
 
-This builds the Swift package, wraps it into `build/Infinity Flow.app` (icon, Info.plist, ad-hoc signature) and opens it.
-Set `SIGN_IDENTITY` to an Apple Development certificate to keep permissions across rebuilds. The tests need Xcode.
+This builds the Swift package, wraps it into `build/Infinity Flow.app` (icon, Info.plist, signature) and opens it.
+macOS remembers permissions by the app's signature, so the script signs with a local self-signed certificate that it
+creates once in its own keychain (`~/Library/Application Support/InfinityFlow/Signing`); your permissions survive
+rebuilds. Set `SIGN_IDENTITY` to use an Apple Development certificate instead. The tests need Xcode.
 
 ### With Xcode
 
