@@ -85,6 +85,6 @@ else
 fi
 echo "Built $APP"
 if [ -z "${NO_OPEN:-}" ]; then
-  pkill -f "$NAME.app/Contents/MacOS" || true
+  pkill -f "$NAME.app/Contents/MacOS" && sleep 1 || true
   open "$APP"
 fi

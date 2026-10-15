@@ -173,7 +173,7 @@ struct HomeView: View {
                     StatPill(value: "\(meetings.count)", label: "meetings", symbol: "person.2")
                 }
 
-                if !controller.accessibilityGranted || !Permissions.microphoneGranted {
+                if !controller.accessibilityGranted || !controller.inputMonitoringGranted || !Permissions.microphoneGranted {
                     SetupCard()
                 }
 

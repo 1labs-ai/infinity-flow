@@ -20,6 +20,7 @@ final class FlowController {
     private(set) var isLocked = false
     private(set) var lastTranscript: String?
     private(set) var accessibilityGranted = Permissions.accessibilityGranted
+    private(set) var inputMonitoringGranted = Permissions.inputMonitoringGranted
     let container: ModelContainer
 
     @ObservationIgnored private let recorder = AudioRecorder()
@@ -340,8 +341,10 @@ final class FlowController {
             Task { @MainActor in
                 guard let self else { return }
                 let granted = Permissions.accessibilityGranted
-                if granted, !self.accessibilityGranted { self.hotkeyMonitor.start() }
+                let listening = Permissions.inputMonitoringGranted
+                if (granted && !self.accessibilityGranted) || (listening && !self.inputMonitoringGranted) { self.hotkeyMonitor.start() }
                 self.accessibilityGranted = granted
+                self.inputMonitoringGranted = listening
             }
         }
     }

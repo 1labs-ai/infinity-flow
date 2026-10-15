@@ -320,8 +320,13 @@ struct PermissionRows: View {
         PermissionRow(title: "Allow on-device speech recognition", detail: "Transcribe on this Mac, without sending audio anywhere.", granted: speech) {
             Task { speech = await Permissions.requestSpeech() }
         }
-        PermissionRow(title: "Allow Infinity Flow to insert spoken words", detail: "This lets Infinity Flow detect your shortcut and put your words in the right textbox.", granted: controller.accessibilityGranted) {
-            Permissions.requestAccessibility()
+        PermissionRow(title: "Allow Infinity Flow to detect your shortcut", detail: "Input Monitoring lets Infinity Flow notice when you hold your dictation key.", granted: controller.inputMonitoringGranted,
+                      request: Permissions.requestInputMonitoring) {
+            Permissions.resetAndRequest("ListenEvent", request: Permissions.requestInputMonitoring)
+        }
+        PermissionRow(title: "Allow Infinity Flow to insert spoken words", detail: "Accessibility lets Infinity Flow put your words in the right textbox.", granted: controller.accessibilityGranted,
+                      request: Permissions.requestAccessibility) {
+            Permissions.resetAndRequest("Accessibility", request: Permissions.requestAccessibility)
         }
     }
 }
@@ -331,6 +336,8 @@ private struct PermissionRow: View {
     let detail: String
     let granted: Bool
     let request: () -> Void
+    /// For entries that look switched on in System Settings but don't apply: clear them and ask again.
+    var reset: (() -> Void)?
 
     var body: some View {
         HStack {
@@ -342,7 +349,14 @@ private struct PermissionRow: View {
                 Text(detail).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            if !granted { Button("Allow", action: request) }
+            if !granted {
+                if let reset {
+                    Button("Already on? Reset", action: reset)
+                        .buttonStyle(.link)
+                        .help("If Infinity Flow is switched on in System Settings but this still isn't ticked, an older build's entry is in the way. This clears it so you can allow it again.")
+                }
+                Button("Allow", action: request).buttonStyle(.ink)
+            }
         }
     }
 }
