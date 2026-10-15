@@ -83,7 +83,7 @@ final class MeetingController {
             SettingsKey.meetingLength: MeetingLength.threeHours.rawValue,
             SettingsKey.meetingCalendar: false,
             SettingsKey.meetingEngine: TranscriptionEngine.cloud.rawValue,
-            SettingsKey.speechLanguage: SpeechLanguage.auto.rawValue,
+            SettingsKey.speechLanguage: SpeechLanguage.forThisMac.rawValue,
             SettingsKey.notesLanguage: NotesLanguage.english.rawValue,
         ])
         panel = MeetingPanelController(meetings: self)
@@ -306,7 +306,14 @@ final class MeetingController {
         }
         do {
             let heard = try await EngineSettings.transcribeMeeting(url, context: context(before: segment))
-            segment.text = heard.text.isEmpty || EngineSettings.cleanupMode == .off ? heard.text : LightCleanup.clean(heard.text)
+            let tidy = { (text: String) in text.isEmpty || EngineSettings.cleanupMode == .off ? text : LightCleanup.clean(text) }
+            if let lines = heard.lines {
+                let cleaned = lines.map { TimedText(start: $0.start, end: $0.end, text: tidy($0.text)) }.filter { !$0.text.isEmpty }
+                segment.sentences = cleaned
+                segment.text = cleaned.map(\.text).joined(separator: " ")
+            } else {
+                segment.text = tidy(heard.text)
+            }
             segment.provider = heard.provider
             segment.status = "done"
             segment.errorMessage = nil
@@ -355,7 +362,6 @@ final class MeetingController {
             meeting.status = MeetingStatus.done.rawValue
             try? context.save()
         }
-        removeEcho(in: meeting)
         let lines = meeting.transcriptLines
         guard !lines.isEmpty || !meeting.userNotes.trimmed.isEmpty else {
             meeting.notesError = (meeting.segments ?? []).contains(where: \.isFailed)
@@ -380,18 +386,6 @@ final class MeetingController {
             if !NSApp.isActive { show(notice: "Your notes for “\(meeting.title)” are ready.", meeting: meeting.uuid, duration: 8) }
         } catch {
             meeting.notesError = "Couldn't write notes: \(error.localizedDescription)"
-        }
-    }
-
-    /// Drops "You" parts that only repeat the call, heard through the speakers. The audio is kept.
-    private func removeEcho(in meeting: Meeting) {
-        let done = (meeting.segments ?? []).filter { $0.isDone && !$0.text.isEmpty }
-        let theirs = done.filter { $0.meetingSpeaker == .others }
-        for mine in done where mine.meetingSpeaker == .you {
-            let overlapping = theirs.filter {
-                EchoFilter.overlaps(start: mine.start, end: mine.start + mine.duration, with: ($0.start, $0.start + $0.duration))
-            }
-            if EchoFilter.isEcho(mine.text, theirs: overlapping.map(\.text)) { mine.text = "" }
         }
     }
 

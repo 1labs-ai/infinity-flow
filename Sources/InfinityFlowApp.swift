@@ -28,7 +28,7 @@ struct InfinityFlowApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: [SettingsKey.showInDock: true])
+        UserDefaults.standard.register(defaults: [SettingsKey.showInDock: true, SettingsKey.speechLanguage: SpeechLanguage.forThisMac.rawValue])
         DockIcon.apply()
     }
 }

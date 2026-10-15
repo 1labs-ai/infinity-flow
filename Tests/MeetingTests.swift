@@ -228,6 +228,50 @@ final class MeetingTests: XCTestCase {
         XCTAssertTrue(model.prompts[0].prompt.hasPrefix("Attendees: Sam\n\nTranscript:\n\n[0:00] You: Quick sync."))
     }
 
+    /// Real output from a test meeting: the mic heard the speakers, and Whisper wrote the English in Devanagari.
+    func testEchoWrittenInAnotherScriptIsDetected() {
+        let theirs = ["Good morning, let's review the Kindly Objects website launch.",
+                      "मैंने homepage का design पूरा कर लिया है, बस mobile version बाकी है."]
+        XCTAssertTrue(EchoFilter.isEcho("गुड मॉर्निंग, लेट्स रिव्यू दे कांडली आपचिक्ट्स वेबसाइड लाउंच", theirs: theirs))
+        XCTAssertTrue(EchoFilter.isEcho("मैंने होमपेज का डिजाइन पूरा कर लिया है, बस मोबाइल वर्जन बागी है", theirs: theirs))
+        XCTAssertFalse(EchoFilter.isEcho("I can share the Figma file with the developers after lunch", theirs: theirs))
+    }
+
+    /// Parts are split into timed sentences, so turns interleave in the order they were said, and echo is removed
+    /// per sentence, keeping your own words from the same part.
+    func testConversationOrderAndPerSentenceEcho() {
+        let others = TrackLine.lines(speaker: .others, partStart: 0, partDuration: 30, text: "", timed: [
+            TimedText(start: 0, end: 5, text: "Can you finish the mobile version by Thursday?"),
+            TimedText(start: 12, end: 18, text: "Perfect, the budget for ads is one lakh rupees."),
+        ])
+        let mine = TrackLine.lines(speaker: .you, partStart: 4, partDuration: 20, text: "", timed: [
+            TimedText(start: 0, end: 1.5, text: "Can you finish the mobile version by Thursday?"),
+            TimedText(start: 2, end: 6, text: "Yes, I will have it ready by Thursday evening."),
+        ])
+        let conversation = TrackLine.conversation(others + mine)
+        XCTAssertEqual(conversation.map(\.speaker), [.others, .you, .others])
+        XCTAssertEqual(conversation[1].text, "Yes, I will have it ready by Thursday evening.")
+        XCTAssertEqual(conversation[1].start, 6, accuracy: 1e-9)
+    }
+
+    func testPartsWithoutTimestampsAreOneLine() {
+        let lines = TrackLine.lines(speaker: .you, partStart: 10, partDuration: 12, text: "Hello there", timed: nil)
+        XCTAssertEqual(lines, [TrackLine(speaker: .you, start: 10, end: 22, text: "Hello there")])
+        XCTAssertEqual(TrackLine.lines(speaker: .you, partStart: 0, partDuration: 5, text: "", timed: nil), [])
+    }
+
+    func testWhisperNonSpeechSentencesAreDropped() throws {
+        let json = #"{"text":" Hello. Thank you.","segments":[{"start":0,"end":2,"text":" Hello.","no_speech_prob":0.01,"avg_logprob":-0.2},{"start":2,"end":4,"text":" Thank you.","no_speech_prob":0.9,"avg_logprob":-1.2}]}"#
+        let response = try JSONDecoder().decode(CloudTranscriber.Response.self, from: Data(json.utf8))
+        XCTAssertEqual(response.segments?.map(\.isLikelyNotSpeech), [false, true])
+    }
+
+    func testIndiaDefaultsToHinglish() {
+        XCTAssertEqual(SpeechLanguage.forRegion(.india), .hinglish)
+        XCTAssertEqual(SpeechLanguage.forRegion(.unitedStates), .auto)
+        XCTAssertEqual(SpeechLanguage.forRegion(nil), .auto)
+    }
+
     func testEchoIsDetectedAcrossScripts() {
         // The same Hindi, heard from the speakers by the mic (Roman letters) and by the system audio tap (Devanagari).
         let mine = "Namaste team aaj Hum Naye page k bare Mein Baat karenge Rahul Somwar Ko website Par upload karenge"

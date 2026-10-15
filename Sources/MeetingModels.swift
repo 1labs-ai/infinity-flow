@@ -183,9 +183,15 @@ final class Meeting: ExpandedModel {
         return speaker.defaultName(attendees: attendees)
     }
 
+    /// The conversation in the order it was said: each part split into its timed sentences, both tracks merged,
+    /// and echo of the call removed from your track.
     var transcriptLines: [MeetingLine] {
-        orderedSegments.filter { $0.isDone && !$0.text.isEmpty }.map {
-            MeetingLine(speaker: name(of: $0.meetingSpeaker), start: $0.start, text: $0.text)
+        let lines = orderedSegments.filter { $0.isDone && !$0.text.isEmpty }.flatMap {
+            TrackLine.lines(speaker: $0.meetingSpeaker, partStart: $0.start, partDuration: $0.duration, text: $0.text,
+                            timed: $0.sentences, segment: $0.uuid)
+        }
+        return TrackLine.conversation(lines).map {
+            MeetingLine(speaker: name(of: $0.speaker), start: $0.start, text: $0.text, segment: $0.segment)
         }
     }
 
@@ -368,6 +374,20 @@ final class MeetingSegment: ExpandedModel {
     }
     private var _meeting: _SwiftDataNoType
 
+    /// The part's sentences with their times (JSON `[TimedText]`), when the engine gave timestamps.
+    var timedLines: String? {
+        @storageRestrictions(accesses: _$backingData, initializes: _timedLines)
+        init { _$backingData.setValue(forKey: \.timedLines, to: newValue); _timedLines = _SwiftDataNoType() }
+        get { read(\.timedLines) }
+        set { write(\.timedLines, newValue) }
+    }
+    private var _timedLines: _SwiftDataNoType
+
+    var sentences: [TimedText]? {
+        get { timedLines.flatMap { try? JSONDecoder().decode([TimedText].self, from: Data($0.utf8)) } }
+        set { timedLines = newValue.flatMap { try? String(decoding: JSONEncoder().encode($0), as: UTF8.self) } }
+    }
+
     init(speaker: MeetingSpeaker, start: Double, duration: Double, audioFileName: String) {
         self.speaker = speaker.rawValue
         self.start = start
@@ -407,6 +427,7 @@ final class MeetingSegment: ExpandedModel {
             Schema.PropertyMetadata(name: "errorMessage", keypath: \MeetingSegment.errorMessage, defaultValue: nil, metadata: nil),
             Schema.PropertyMetadata(name: "provider", keypath: \MeetingSegment.provider, defaultValue: nil, metadata: nil),
             Schema.PropertyMetadata(name: "meeting", keypath: \MeetingSegment.meeting, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "timedLines", keypath: \MeetingSegment.timedLines, defaultValue: nil, metadata: nil),
         ]
     }
 
@@ -421,6 +442,7 @@ final class MeetingSegment: ExpandedModel {
         _errorMessage = _SwiftDataNoType()
         _provider = _SwiftDataNoType()
         _meeting = _SwiftDataNoType()
+        _timedLines = _SwiftDataNoType()
         persistentBackingData = backingData
     }
 }
