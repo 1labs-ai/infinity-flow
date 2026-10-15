@@ -266,6 +266,39 @@ final class MeetingTests: XCTestCase {
         XCTAssertEqual(response.segments?.map(\.isLikelyNotSpeech), [false, true])
     }
 
+    func testSpeakerLabelsAreParsed() {
+        let reply = "1: Sarah\n**3: Priya**\n[4]: \"Rahul\".\n5: You\nnot a line\n6: Speaker 1"
+        XCTAssertEqual(SpeakerAssignment.parse(reply), [1: "Sarah", 3: "Priya", 4: "Rahul", 6: "Speaker 1"])
+    }
+
+    /// Pitches measured in a real test meeting: Sarah's second turn was left as "Speaker 1".
+    func testUnnamedSpeakerMergesIntoMatchingVoice() {
+        let pitches = ["Sarah": [186.0], "Priya": [242.0, 246.0], "Rahul": [122.0, 124.0], "Speaker 1": [190.0]]
+        XCTAssertEqual(SpeakerAssignment.mergeByVoice(pitches), ["Speaker 1": "Sarah"])
+        XCTAssertEqual(SpeakerAssignment.mergeByVoice(["Amit": [120], "Ravi": [140], "Speaker 2": [130]]), [:],
+                       "two named voices nearby: not sure enough to merge")
+        XCTAssertTrue(SpeakerAssignment.isPlaceholder("Speaker 12"))
+        XCTAssertFalse(SpeakerAssignment.isPlaceholder("Speakerphone"))
+    }
+
+    func testPitchOfASteadyVoice() {
+        let rate = 16_000.0
+        let samples = (0..<Int(rate)).map { Float(0.3 * sin(2 * Double.pi * 150 * Double($0) / rate)) }
+        XCTAssertEqual(PitchEstimator.medianPitch(samples, sampleRate: rate) ?? 0, 150, accuracy: 4)
+        XCTAssertNil(PitchEstimator.medianPitch([Float](repeating: 0, count: 16_000), sampleRate: rate), "silence has no pitch")
+    }
+
+    func testSpeakerWindowsCarryKnownVoices() {
+        let lines = (1...6).map { SpeakerAssignment.Line(id: $0, isYou: $0 == 2, text: String(repeating: "x", count: 50), pitch: 150) }
+        let windows = SpeakerAssignment.windows(lines, budget: 200)
+        XCTAssertEqual(windows.map(\.count), [2, 2, 2])
+        let prompt = SpeakerAssignment.prompt(windows[0], attendees: ["Rahul"], known: ["Sarah": 186])
+        XCTAssertTrue(prompt.contains("Invited to the meeting: Rahul"))
+        XCTAssertTrue(prompt.contains("Sarah (about 186 Hz)"))
+        XCTAssertTrue(prompt.contains("1 (voice 150 Hz): "))
+        XCTAssertTrue(prompt.contains("You: "))
+    }
+
     func testIndiaDefaultsToHinglish() {
         XCTAssertEqual(SpeechLanguage.forRegion(.india), .hinglish)
         XCTAssertEqual(SpeechLanguage.forRegion(.unitedStates), .auto)

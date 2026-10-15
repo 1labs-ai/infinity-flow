@@ -29,6 +29,7 @@ struct InfinityFlowApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [SettingsKey.showInDock: true, SettingsKey.speechLanguage: SpeechLanguage.forThisMac.rawValue])
+        APIKeyStore.preload(provider: UserDefaults.standard.string(forKey: SettingsKey.cloudPreset) ?? CloudPreset.groq.id)
         DockIcon.apply()
     }
 }

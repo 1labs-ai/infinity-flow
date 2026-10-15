@@ -232,7 +232,8 @@ struct MeetingDetailView: View {
         var parts = [meeting.createdAt.formatted(date: .abbreviated, time: .shortened)]
         if meeting.duration > 0 { parts.append(MeetingFormat.duration(meeting.duration)) }
         if let app = meeting.appName { parts.append(app) }
-        if !meeting.attendees.isEmpty { parts.append("with " + meeting.attendees.joined(separator: ", ")) }
+        let members = meeting.members
+        if !members.isEmpty { parts.append("with " + members.joined(separator: ", ")) }
         return parts.joined(separator: " · ")
     }
 
@@ -468,7 +469,8 @@ private struct TranscriptTab: View {
     @Environment(MeetingController.self) private var meetings
     let meeting: Meeting
     let live: Bool
-    @State private var renaming: MeetingSpeaker?
+    /// The display name being renamed: You, a person on the call, or Others.
+    @State private var renaming: String?
     @State private var newName = ""
 
     var body: some View {
@@ -482,9 +484,9 @@ private struct TranscriptTab: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(Array(turns.enumerated()), id: \.offset) { index, turn in
-                        TurnRow(meeting: meeting, turn: turn) { speaker in
-                            newName = meeting.name(of: speaker)
-                            renaming = speaker
+                        TurnRow(meeting: meeting, turn: turn) { name in
+                            newName = name
+                            renaming = name
                         }
                         .id(index)
                     }
@@ -503,12 +505,20 @@ private struct TranscriptTab: View {
         .alert("Rename speaker", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Rename") {
-                if renaming == .you { meeting.youName = newName.trimmed } else { meeting.othersName = newName.trimmed }
+                if let renaming {
+                    if renaming == meeting.name(of: .you) {
+                        meeting.youName = newName.trimmed
+                    } else if meeting.members.contains(renaming) {
+                        meeting.rename(speaker: renaming, to: newName)
+                    } else {
+                        meeting.othersName = newName.trimmed
+                    }
+                }
                 renaming = nil
             }
             Button("Cancel", role: .cancel) { renaming = nil }
         } message: {
-            Text(renaming == .you ? "The name used for your microphone." : "The name used for everyone else on the call.")
+            Text(renaming == meeting.name(of: .you) ? "The name used for your microphone." : "Everywhere this person speaks in the meeting.")
         }
     }
 }
@@ -517,7 +527,7 @@ private struct TranscriptTab: View {
 private struct TurnRow: View {
     let meeting: Meeting
     let turn: MeetingLine
-    let rename: (MeetingSpeaker) -> Void
+    let rename: (String) -> Void
     @State private var hovering = false
 
     private var speaker: MeetingSpeaker { turn.speaker == meeting.name(of: .you) ? .you : .others }
@@ -528,13 +538,13 @@ private struct TurnRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Menu(turn.speaker) {
-                    Button("Rename speaker…") { rename(speaker) }
+                    Button("Rename speaker…") { rename(turn.speaker) }
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .fontWeight(.semibold)
-                .foregroundStyle(speaker == .you ? Color.orange : Color.accentColor)
+                .foregroundStyle(speaker == .you ? Color.orange : SpeakerColor.color(for: turn.speaker))
                 Text(MeetingFormat.timestamp(turn.start)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 if let segment, let url = segment.audioURL, FileManager.default.fileExists(atPath: url.path) {
                     let playing = playback.playingID == segment.uuid
@@ -549,6 +559,15 @@ private struct TurnRow: View {
             Text(turn.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
         .onHover { hovering = $0 }
+    }
+}
+
+/// A steady color per person on the call, so turns are easy to follow.
+enum SpeakerColor {
+    private static let palette: [Color] = [.blue, .green, .purple, .teal, .pink, .indigo, .mint, .cyan]
+
+    static func color(for name: String) -> Color {
+        palette[Int(name.unicodeScalars.reduce(UInt32(0)) { $0 &* 31 &+ $1.value } % UInt32(palette.count))]
     }
 }
 
