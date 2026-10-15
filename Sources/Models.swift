@@ -263,4 +263,7 @@ enum SettingsKey {
     static let meetingEchoCancellation = "meetingEchoCancellation"
     static let meetingLength = "meetingLength"
     static let meetingCalendar = "meetingCalendar"
+    static let meetingEngine = "meetingEngine"
+    static let meetingLanguage = "meetingLanguage"
+    static let notesLanguage = "notesLanguage"
 }

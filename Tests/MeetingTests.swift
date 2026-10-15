@@ -165,6 +165,23 @@ final class MeetingTests: XCTestCase {
                                            "Team - meet again on Monday."])
     }
 
+    func testBareDecisionsLabelBecomesAHeading() {
+        let notes = MeetingNotes.parse("TITLE: Sync\nSUMMARY: Done.\nNOTES:\n## Plan\n- Ship\nDECISIONS\n- Ship Friday\nACTION ITEMS:\n- None")
+        XCTAssertEqual(notes.notes, "## Plan\n- Ship\n## Decisions\n- Ship Friday")
+    }
+
+    func testMeetingLanguagePrompt() {
+        XCTAssertNil(MeetingLanguage.prompt(style: nil, context: ""))
+        XCTAssertEqual(MeetingLanguage.prompt(style: "Haan toh", context: "Priya will send it"), "Haan toh Priya will send it")
+        let long = String(repeating: "word ", count: 200)
+        let prompt = MeetingLanguage.prompt(style: "Style.", context: long, limit: 60)!
+        XCTAssertLessThanOrEqual(prompt.count, 60)
+        XCTAssertTrue(prompt.hasPrefix("Style. word"), "keeps whole words from the end of the context")
+        XCTAssertEqual(MeetingLanguage.hinglish.whisperLanguage, nil, "mixed speech is detected, not forced")
+        XCTAssertEqual(MeetingLanguage.hindi.whisperLanguage, "hi")
+        XCTAssertEqual(MeetingLanguage.hindi.locale.language.languageCode?.identifier, "hi")
+    }
+
     func testParsesBoldLabelsAndNoActionItems() {
         let notes = MeetingNotes.parse("**Title:** \"Weekly 1:1\"\n**Summary:** Caught up.\n**Action items:**\n- None.")
         XCTAssertEqual(notes.title, "Weekly 1:1")
@@ -195,7 +212,7 @@ final class MeetingTests: XCTestCase {
         XCTAssertGreaterThan(model.prompts.count, 2, "parts first, then the final notes")
         XCTAssertTrue(model.prompts.dropLast().allSatisfy { $0.instructions == MeetingNotes.partInstructions })
         let final = try XCTUnwrap(model.prompts.last)
-        XCTAssertEqual(final.instructions, MeetingNotes.instructions)
+        XCTAssertEqual(final.instructions, MeetingNotes.instructions(language: .english))
         XCTAssertTrue(final.prompt.contains("Remember pricing"))
         XCTAssertTrue(final.prompt.contains("Notes taken on each part"))
         XCTAssertTrue(model.prompts.allSatisfy { $0.prompt.count <= 1_400 + MeetingNotes.format.count })
@@ -209,6 +226,16 @@ final class MeetingTests: XCTestCase {
             .write(lines: [MeetingLine(speaker: "You", start: 0, text: "Quick sync.")], userNotes: "", attendees: ["Sam"])
         XCTAssertEqual(model.prompts.count, 1)
         XCTAssertTrue(model.prompts[0].prompt.hasPrefix("Attendees: Sam\n\nTranscript:\n\n[0:00] You: Quick sync."))
+    }
+
+    func testEchoIsDetectedAcrossScripts() {
+        // The same Hindi, heard from the speakers by the mic (Roman letters) and by the system audio tap (Devanagari).
+        let mine = "Namaste team aaj Hum Naye page k bare Mein Baat karenge Rahul Somwar Ko website Par upload karenge"
+        let theirs = ["नमस्ते टीम आज हम नए पेज कि बारे में एक बात करेंगे प्रिय टकरा करेंगे राहुल सोमवार को अपलोड करेंगे"]
+        XCTAssertTrue(EchoFilter.isEcho(mine, theirs: theirs))
+        XCTAssertFalse(EchoFilter.isEcho("Theek hai, main pricing page dekh leta hoon kal tak", theirs: theirs), "a reply isn't an echo")
+        XCTAssertTrue(EchoFilter.soundKeys("नमस्ते").contains("nmst"))
+        XCTAssertTrue(EchoFilter.soundKeys("Namaste").contains("nmst"))
     }
 
     func testEchoOfTheCallIsDetected() {

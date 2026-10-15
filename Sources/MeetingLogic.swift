@@ -138,29 +138,37 @@ struct MeetingNotes: Equatable {
     var notes: String
     var actionItems: [String]
 
-    static let instructions = """
-        You write meeting notes from a transcript. "You" is the person who recorded the meeting. Be accurate and \
-        concise. Use only what was said, never invent names, numbers or decisions, and keep numbers, names and \
-        terms exactly as written. If something is unclear, leave it out. Write in the language of the transcript.
+    static func instructions(language: NotesLanguage) -> String {
         """
+        You are an expert meeting note-taker. You get a transcript made by speech recognition. "You" is the person \
+        who recorded the meeting; "Others" (or a name) is everyone else on the call. People may speak English, Hindi \
+        or a mix of both (Hinglish), in Devanagari or Roman letters. The transcript has recognition errors: work out \
+        what was meant from context, and never copy an obviously misheard word into the notes. \
+        Be accurate and specific: keep every decision, number, date, name, product and owner that was said, and \
+        never invent any. Leave out small talk. \(language.instruction)
+        """
+    }
 
     static let format = """
-        Reply in exactly this format:
-        TITLE: a short title for the meeting, at most 8 words
-        SUMMARY: one or two sentences on what the meeting was about and what was decided
+        Reply in exactly this format, with no other text:
+        TITLE: a specific title naming what the meeting was about, at most 8 words
+        SUMMARY: two or three sentences: the purpose of the meeting, the main outcomes and what happens next
         NOTES:
         ## A short topic heading
-        - a key point, decision or detail
-        (repeat for each topic)
+        - a key point, with the specifics (numbers, dates, names)
+        (one heading per topic discussed, in the order discussed)
+        ## Decisions
+        - each decision that was made (leave this heading out if there were none)
         ACTION ITEMS:
-        - a task, starting with the owner's name when one was said
-        (write "- None" when there are no tasks)
+        - Owner: the task, by when (if a deadline was said). Use "You" for the person who recorded.
+        (include tasks people agreed to or were asked to do; write "- None" only if there were truly none)
         """
 
     static let partInstructions = """
-        You take notes on one part of a longer meeting transcript. List the topics, key points, decisions, \
-        numbers and tasks (with owners) from this part as short bullet points. Use only what was said. \
-        Write in the language of the transcript.
+        You take detailed notes on one part of a longer meeting. The transcript comes from speech recognition and may \
+        be in English, Hindi or Hinglish with recognition errors; work out what was meant. List the topics, key \
+        points, decisions, numbers, dates and tasks with owners as short bullet points, in English. Use only what \
+        was said.
         """
 
     /// Parses a reply written in `format`. Tolerates bold labels, missing sections and "None".
@@ -185,6 +193,8 @@ struct MeetingNotes: Equatable {
             } else if upper.hasPrefix("NOTES:") {
                 section = .notes
                 notes.append(String(label.dropFirst(6)))
+            } else if section == .notes, ["DECISIONS", "DECISIONS:"].contains(upper) {
+                notes.append("## Decisions")
             } else if upper.hasPrefix("ACTION ITEMS:") {
                 section = .actions
                 actions.append(String(label.dropFirst(13)))
@@ -240,12 +250,25 @@ struct MeetingNotes: Equatable {
 /// Without echo cancellation (it can't always start), a mic near speakers also hears the call. Such a "You" part
 /// repeats what "Others" said at the same moment; it is dropped from the transcript.
 enum EchoFilter {
-    /// True when most of `mine`'s words were said by others in overlapping parts.
+    /// True when most of `mine`'s words were said by others in overlapping parts. Words are compared by sound,
+    /// so the same Hindi heard as Devanagari on one track and Roman letters on the other still matches.
     static func isEcho(_ mine: String, theirs: [String]) -> Bool {
-        let words = MeetingContext.keywords(mine)
+        let words = soundKeys(mine)
         guard words.count >= 3 else { return false }
-        let heard = theirs.reduce(into: Set<String>()) { $0.formUnion(MeetingContext.keywords($1)) }
-        return Double(words.intersection(heard).count) / Double(words.count) >= 0.6
+        let heard = theirs.reduce(into: Set<String>()) { $0.formUnion(soundKeys($1)) }
+        return Double(words.intersection(heard).count) / Double(words.count) >= 0.5
+    }
+
+    /// A rough sound key per word: Latin letters, no accents, no vowels, no doubled letters
+    /// ("नमस्ते" and "Namaste" both become "nmst").
+    static func soundKeys(_ text: String) -> Set<String> {
+        let latin = (text.applyingTransform(.toLatin, reverse: false) ?? text)
+            .applyingTransform(.stripDiacritics, reverse: false)?.lowercased() ?? text.lowercased()
+        return Set(latin.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).compactMap { word -> String? in
+            var key = ""
+            for character in word where !"aeiouy'".contains(character) && key.last != character { key.append(character) }
+            return key.count >= 2 ? key : nil
+        })
     }
 
     /// Others' parts that overlap a part spanning `start..<end`, with a little slack for chunk boundaries.
@@ -289,8 +312,11 @@ enum MeetingContext {
     }
 
     static let instructions = """
-        You answer questions about a meeting using only its notes and transcript below. "You" is the person who \
-        recorded it. If the answer isn't in the meeting, say so plainly. Be brief, and quote numbers and names exactly.
+        You answer questions about a meeting using its notes and transcript below. "You" is the person who recorded it. \
+        The transcript comes from speech recognition and may mix English and Hindi (Hinglish) with recognition errors; \
+        work out what was meant. Answer in the same language as the question (Hindi, Hinglish or English). Be specific \
+        and brief, quote numbers, dates and names exactly, and say who said what when it matters. If the meeting \
+        doesn't answer the question, say so plainly instead of guessing.
         """
 }
 
@@ -323,6 +349,80 @@ enum MeetingApps {
     /// The display name of a call app, or `nil` when the bundle ID isn't one.
     static func name(bundleID: String) -> String? {
         known.first { bundleID.hasPrefix($0.prefix) }?.name
+    }
+}
+
+/// The language people speak in meetings, which steers transcription.
+enum MeetingLanguage: String, CaseIterable, Identifiable {
+    case auto, english, hindi, hinglish
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: "Detect automatically"
+        case .english: "English"
+        case .hindi: "Hindi (हिन्दी)"
+        case .hinglish: "Hinglish (Hindi and English mixed, in Roman letters)"
+        }
+    }
+
+    /// The language code sent to Whisper. Mixed speech is left to detection, so English words aren't translated.
+    var whisperLanguage: String? {
+        switch self {
+        case .english: "en"
+        case .hindi: "hi"
+        case .auto, .hinglish: nil
+        }
+    }
+
+    /// An example in the wanted style. Whisper continues in the script and style of its prompt, which keeps
+    /// Hinglish in Roman letters and Hindi in Devanagari.
+    var stylePrompt: String? {
+        switch self {
+        case .hinglish: "Haan, toh aaj ki meeting mein hum landing page aur launch plan discuss karenge. Okay, next steps kya hain?"
+        case .hindi: "नमस्ते, आज की मीटिंग में हम लॉन्च प्लान और अगले कदमों पर बात करेंगे।"
+        case .auto, .english: nil
+        }
+    }
+
+    /// Apple's recognizer hears one language at a time.
+    var locale: Locale {
+        switch self {
+        case .hindi, .hinglish: Locale(identifier: "hi-IN")
+        case .english: Locale.current.language.languageCode == .english ? Locale.current : Locale(identifier: "en-US")
+        case .auto: Locale.current
+        }
+    }
+
+    /// The prompt for one part: the style example, then the end of the transcript so far, within Whisper's limit.
+    static func prompt(style: String?, context: String, limit: Int = 400) -> String? {
+        let room = limit - (style.map { $0.count + 1 } ?? 0)
+        let tail = room > 0 ? String(context.suffix(room)) : ""
+        let trimmedTail = tail.count < context.count ? String(tail.drop { !$0.isWhitespace }).trimmed : tail.trimmed
+        let parts = [style, trimmedTail.isEmpty ? nil : trimmedTail].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+}
+
+/// The language meeting notes are written in.
+enum NotesLanguage: String, CaseIterable, Identifiable {
+    case english, meeting
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .english: "English"
+        case .meeting: "The language of the meeting"
+        }
+    }
+
+    var instruction: String {
+        switch self {
+        case .english: "Write everything in clear English, translating what was said in Hindi or any other language."
+        case .meeting: "Write in the main language of the meeting (for Hinglish, in Roman letters)."
+        }
     }
 }
 
