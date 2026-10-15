@@ -95,31 +95,40 @@ enum CleanupGuard {
         """
 }
 
-protocol TextCleaner {
-    func clean(_ text: String) async throws -> String
+/// A chat model that answers one prompt. Used for AI polish and for meeting notes.
+protocol LanguageModel {
+    /// Roughly how many characters of input fit in one prompt, leaving room for the reply.
+    var promptBudget: Int { get }
+    func respond(instructions: String, prompt: String) async throws -> String
 }
 
 #if canImport(FoundationModels)
 /// Apple's on-device language model (Apple Intelligence). Text never leaves the Mac.
 @available(macOS 26.0, *)
-struct AppleIntelligenceCleaner: TextCleaner {
+struct AppleIntelligenceModel: LanguageModel {
     static var isAvailable: Bool { SystemLanguageModel.default.availability == .available }
 
-    func clean(_ text: String) async throws -> String {
-        let session = LanguageModelSession(instructions: CleanupGuard.instructions)
-        return try await session.respond(to: text).content
+    /// The on-device model has a 4,096-token window shared by the prompt and the reply.
+    var promptBudget: Int { 7_000 }
+
+    func respond(instructions: String, prompt: String) async throws -> String {
+        let session = LanguageModelSession(instructions: instructions)
+        return try await session.respond(to: prompt).content
     }
 }
 #endif
 
 /// Any OpenAI-compatible chat model, called with the user's own key.
-struct CloudChatCleaner: TextCleaner {
+struct CloudChatModel: LanguageModel {
     let baseURL: String
     let model: String
     let apiKey: String?
+    var timeout: TimeInterval = 30
     var session: URLSession = .shared
 
-    func clean(_ text: String) async throws -> String {
+    var promptBudget: Int { 48_000 }
+
+    func respond(instructions: String, prompt: String) async throws -> String {
         guard let url = CloudPreset.endpoint(base: baseURL, path: "/chat/completions") else {
             throw FlowError.api("Set a server URL in Settings.")
         }
@@ -131,15 +140,14 @@ struct CloudChatCleaner: TextCleaner {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey, !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeout
         request.httpBody = try JSONEncoder().encode(Request(
             model: model,
-            messages: [Message(role: "system", content: CleanupGuard.instructions), Message(role: "user", content: text)],
+            messages: [Message(role: "system", content: instructions), Message(role: "user", content: prompt)],
             temperature: 0))
         let (data, response) = try await session.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw FlowError.api("AI polish failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
-        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw FlowError.api(CloudTranscriber.errorMessage(status: status, data: data)) }
         return try JSONDecoder().decode(Response.self, from: data).choices.first?.message.content ?? ""
     }
 }

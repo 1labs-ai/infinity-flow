@@ -62,7 +62,8 @@ enum Store {
     static let container: ModelContainer = {
         let configuration = ModelConfiguration(url: folder.appendingPathComponent("History.store"))
         do {
-            return try ModelContainer(for: Transcript.self, configurations: configuration)
+            return try ModelContainer(for: Transcript.self, Meeting.self, MeetingSegment.self, MeetingActionItem.self,
+                                      configurations: configuration)
         } catch {
             fatalError("Could not open the history store: \(error)")
         }
@@ -128,4 +129,9 @@ enum SettingsKey {
     static let keepRecordings = "keepRecordings"
     static let recordingRetention = "recordingRetention"
     static let showInDock = "showInDock"
+    static let detectMeetings = "detectMeetings"
+    static let stopWhenCallEnds = "stopWhenCallEnds"
+    static let meetingEchoCancellation = "meetingEchoCancellation"
+    static let meetingLength = "meetingLength"
+    static let meetingCalendar = "meetingCalendar"
 }

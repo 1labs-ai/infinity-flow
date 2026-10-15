@@ -5,20 +5,22 @@ import SwiftUI
 struct InfinityFlowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = FlowController()
+    @State private var meetings = MeetingController()
 
     var body: some Scene {
         Window("Infinity Flow", id: "hub") {
             HubView()
                 .environment(controller)
+                .environment(meetings)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .modelContainer(controller.container)
         .windowResizability(.contentMinSize)
 
         MenuBarExtra {
-            MenuBarContent().environment(controller)
+            MenuBarContent().environment(controller).environment(meetings)
         } label: {
-            Image(systemName: controller.state == .listening ? "waveform.circle.fill" : "waveform")
+            Image(systemName: meetings.isRecording ? "record.circle" : controller.state == .listening ? "waveform.circle.fill" : "waveform")
         }
     }
 }
@@ -41,6 +43,7 @@ enum DockIcon {
 
 struct MenuBarContent: View {
     @Environment(FlowController.self) private var controller
+    @Environment(MeetingController.self) private var meetings
     @Environment(\.openWindow) private var openWindow
     @AppStorage(SettingsKey.hotkey) private var hotkey = Hotkey.fn.rawValue
 
@@ -51,6 +54,16 @@ struct MenuBarContent: View {
             openWindow(id: "hub")
             NSApp.activate()
         }
+        if meetings.isRecording {
+            Button("Stop meeting notes") { meetings.stop() }
+            Button(meetings.phase == .paused ? "Resume meeting notes" : "Pause meeting notes") {
+                meetings.phase == .paused ? meetings.resume() : meetings.pause()
+            }
+        } else {
+            Button("Start meeting notes") { meetings.start() }
+                .disabled(meetings.phase != .idle)
+        }
+        Divider()
         Button("Paste last transcript") { controller.pasteLastTranscript() }
             .disabled(controller.lastTranscript == nil)
         if let last = controller.lastTranscript {
@@ -62,10 +75,11 @@ struct MenuBarContent: View {
     }
 
     private var statusText: String {
+        if meetings.isRecording { return meetings.phase == .paused ? "Meeting notes paused" : "Taking meeting notes…" }
         switch controller.state {
-        case .listening: "Listening…"
-        case .transcribing: "Transcribing…"
-        default: "Hold \((Hotkey(rawValue: hotkey) ?? .fn).title) to dictate"
+        case .listening: return "Listening…"
+        case .transcribing: return "Transcribing…"
+        default: return "Hold \((Hotkey(rawValue: hotkey) ?? .fn).title) to dictate"
         }
     }
 }

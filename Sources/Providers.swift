@@ -45,7 +45,7 @@ struct CloudPreset: Identifiable, Hashable {
     }
 }
 
-/// One dictation, reduced to what the usage and privacy summaries need.
+/// One dictation, meeting or meeting chunk, reduced to what the usage and privacy summaries need.
 struct UsageRecord {
     let date: Date
     let duration: TimeInterval
@@ -99,6 +99,6 @@ struct PrivacySummary: Equatable {
             return "No audio left this Mac."
         }
         let names = cloudProviders.sorted().map { CloudPreset.preset(id: $0).title }.joined(separator: ", ")
-        return "\(cloudCount) of \(cloudCount + onDeviceCount) dictations were sent to \(names) with your key."
+        return "\(cloudCount) of \(cloudCount + onDeviceCount) recordings were sent to \(names) with your key."
     }
 }
