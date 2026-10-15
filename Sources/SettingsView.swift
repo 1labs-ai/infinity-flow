@@ -60,12 +60,11 @@ struct SettingsView: View {
                 Picker("Engine", selection: $engine) {
                     ForEach(TranscriptionEngine.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                if usesCloud {
-                    cloudSettings
-                } else {
-                    Text("Free and private. Speech is transcribed on this Mac whenever your language supports it.")
+                if !usesCloud {
+                    Text("Dictation is free and private: speech is transcribed on this Mac. The cloud provider below is still used for meetings when you choose it there.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
+                cloudSettings
             } header: {
                 Text("Transcription")
             } footer: {
@@ -165,11 +164,25 @@ private struct MeetingsSettingsSection: View {
     @AppStorage(SettingsKey.meetingLength) private var length = MeetingLength.threeHours.rawValue
     @AppStorage(SettingsKey.meetingCalendar) private var useCalendar = false
     @AppStorage(SettingsKey.cleanupModel) private var chatModel = ""
+    @AppStorage(SettingsKey.meetingEngine) private var meetingEngine = TranscriptionEngine.cloud.rawValue
+    @AppStorage(SettingsKey.meetingLanguage) private var meetingLanguage = MeetingLanguage.auto.rawValue
+    @AppStorage(SettingsKey.notesLanguage) private var notesLanguage = NotesLanguage.english.rawValue
     @State private var calendarDenied = false
     @State private var usage = MeetingStore.usage()
 
     var body: some View {
         Section {
+            Picker("Transcribe meetings", selection: $meetingEngine) {
+                Text("In the cloud, with your key (best; any language)").tag(TranscriptionEngine.cloud.rawValue)
+                Text("On this Mac (private; one language)").tag(TranscriptionEngine.onDevice.rawValue)
+            }
+            Picker("Meeting language", selection: $meetingLanguage) {
+                ForEach(MeetingLanguage.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Picker("Write notes in", selection: $notesLanguage) {
+                ForEach(NotesLanguage.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            meetingStatus
             Toggle("Offer to take notes when a call starts", isOn: $detectMeetings)
             Text("Infinity Flow notices when Zoom, Teams, Meet in your browser, FaceTime, Slack or another call app starts using your microphone. It never reads what's on your screen.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -193,7 +206,6 @@ private struct MeetingsSettingsSection: View {
                 Text("Calendar access was denied. Allow it in System Settings › Privacy & Security › Calendars.")
                     .font(.callout).foregroundStyle(.orange)
             }
-            notesModel
             HStack {
                 VStack(alignment: .leading) {
                     Text("Hear other participants").fontWeight(.medium)
@@ -215,18 +227,22 @@ private struct MeetingsSettingsSection: View {
         .onAppear { usage = MeetingStore.usage() }
     }
 
+    /// What meetings will actually use, so a missing key is obvious.
     @ViewBuilder
-    private var notesModel: some View {
-        if EngineSettings.appleIntelligenceAvailable {
-            Label("Summaries and answers use Apple Intelligence on this Mac. Text never leaves your Mac.", systemImage: "lock.shield")
+    private var meetingStatus: some View {
+        let cloud = EngineSettings.cloudReady
+        let preset = EngineSettings.preset
+        if cloud {
+            let model = chatModel.trimmed.isEmpty ? preset.chatModel : chatModel.trimmed
+            Label("Meetings use \(preset.title): \(EngineSettings.cloudEndpoint.model) for the transcript and \(model) for notes and answers. Audio and transcript go straight to \(preset.title) with your key.",
+                  systemImage: "checkmark.seal")
                 .font(.callout).foregroundStyle(.secondary)
         } else {
-            TextField("Chat model for summaries (with your cloud key)", text: $chatModel, prompt: Text("e.g. llama-3.3-70b-versatile or gpt-4o-mini"))
-            Text(chatModel.trimmed.isEmpty
-                 ? "Apple Intelligence isn't available on this Mac. Add a chat model to get summaries, action items and answers; you'll still get a transcript without one."
-                 : "The meeting transcript is sent to \(EngineSettings.preset.title) with your key to write notes. The same model is used for AI polish.")
-                .font(.callout).foregroundStyle(.secondary)
+            Label("No cloud key yet, so meetings are transcribed on this Mac in one language and notes use \(EngineSettings.appleIntelligenceAvailable ? "Apple Intelligence" : "nothing"). For Hindi, Hinglish and Wispr-quality notes, add a free Groq key under Transcription above.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(Theme.accent)
         }
+        TextField("Notes model (optional)", text: $chatModel, prompt: Text(preset.chatModel.isEmpty ? "Model name" : "Default: \(preset.chatModel)"))
     }
 }
 

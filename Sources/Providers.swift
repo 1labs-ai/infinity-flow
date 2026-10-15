@@ -14,16 +14,20 @@ struct CloudPreset: Identifiable, Hashable {
     let keyPage: URL?
     let requiresKey: Bool
     let note: String
+    /// A capable chat model on the same provider, used for meeting notes when no chat model is set.
+    var chatModel: String = ""
 
     static let groq = CloudPreset(
         id: "groq", title: "Groq", baseURL: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo",
         ratePerMinute: 0.04 / 60, minimumBilledSeconds: 10, keyPage: URL(string: "https://console.groq.com/keys"),
-        requiresKey: true, note: "Fastest. The free tier covers most people; after that about $0.04 per hour of audio.")
+        requiresKey: true, note: "Fastest. The free tier covers most people; after that about $0.04 per hour of audio.",
+        chatModel: "llama-3.3-70b-versatile")
 
     static let openAI = CloudPreset(
         id: "openai", title: "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini-transcribe",
         ratePerMinute: 0.003, minimumBilledSeconds: 0, keyPage: URL(string: "https://platform.openai.com/api-keys"),
-        requiresKey: true, note: "About $0.003 per minute of audio.")
+        requiresKey: true, note: "About $0.003 per minute of audio.",
+        chatModel: "gpt-4.1-mini")
 
     static let custom = CloudPreset(
         id: "custom", title: "Custom (OpenAI-compatible)", baseURL: "", model: "",

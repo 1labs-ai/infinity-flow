@@ -76,6 +76,10 @@ struct CloudTranscriber: Transcriber {
     let baseURL: String
     let model: String
     let apiKey: String?
+    /// ISO-639-1 code such as "hi"; `nil` lets the model detect the language.
+    var language: String?
+    /// Text the model continues from: earlier transcript and spelling hints. Whisper reads up to 224 tokens.
+    var prompt: String?
     var session: URLSession = .shared
 
     func transcribe(_ audio: URL) async throws -> String {
@@ -85,13 +89,15 @@ struct CloudTranscriber: Transcriber {
         var body = MultipartBody()
         body.addField("model", model)
         body.addField("response_format", "json")
+        if let language { body.addField("language", language) }
+        if let prompt, !prompt.isEmpty { body.addField("prompt", prompt) }
         body.addFile("file", filename: "speech.wav", mimeType: "audio/wav", contents: try Data(contentsOf: audio))
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         if let apiKey, !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.setValue(body.contentType, forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 60
+        request.timeoutInterval = 90
 
         let (data, response) = try await session.upload(for: request, from: body.finalized())
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -171,6 +177,57 @@ enum EngineSettings {
             let raw = try await CloudTranscriber(baseURL: endpoint.baseURL, model: endpoint.model, apiKey: key).transcribe(audio)
             return Heard(text: TranscriptText.clean(raw) ?? "", engine: engine, provider: preset.id)
         }
+    }
+
+    /// Whether a cloud provider is ready to use: a key for providers that need one, a server for Custom.
+    static var cloudReady: Bool {
+        let preset = preset
+        if preset == .custom { return CloudPreset.endpoint(base: cloudEndpoint.baseURL, path: "/") != nil && !cloudEndpoint.model.isEmpty }
+        return !preset.requiresKey || APIKeyStore.read(provider: preset.id) != nil
+    }
+
+    static var meetingEngine: TranscriptionEngine {
+        let chosen = TranscriptionEngine(rawValue: defaults.string(forKey: SettingsKey.meetingEngine) ?? "") ?? .cloud
+        return chosen == .cloud && cloudReady ? .cloud : .onDevice
+    }
+
+    static var meetingLanguage: MeetingLanguage {
+        MeetingLanguage(rawValue: defaults.string(forKey: SettingsKey.meetingLanguage) ?? "") ?? .auto
+    }
+
+    /// Transcribes one part of a meeting. `context` is the transcript just before it, which keeps names,
+    /// spelling and script (Devanagari or Roman) consistent from part to part.
+    static func transcribeMeeting(_ audio: URL, context: String) async throws -> Heard {
+        let language = meetingLanguage
+        switch meetingEngine {
+        case .onDevice:
+            let raw = try await AppleSpeechTranscriber(locale: language.locale).transcribe(audio)
+            return Heard(text: TranscriptText.clean(raw) ?? "", engine: .onDevice, provider: nil)
+        case .cloud:
+            let preset = preset
+            let endpoint = cloudEndpoint
+            let transcriber = CloudTranscriber(baseURL: endpoint.baseURL, model: endpoint.model, apiKey: APIKeyStore.read(provider: preset.id),
+                                               language: language.whisperLanguage,
+                                               prompt: MeetingLanguage.prompt(style: language.stylePrompt, context: context))
+            let raw = try await transcriber.transcribe(audio)
+            return Heard(text: TranscriptText.clean(raw) ?? "", engine: .cloud, provider: preset.id)
+        }
+    }
+
+    /// For meeting notes and questions: a large cloud model when a key is set (far better at long, mixed-language
+    /// meetings), otherwise Apple Intelligence on this Mac.
+    static func meetingModel(timeout: TimeInterval = 180) -> LanguageModel? {
+        if cloudReady {
+            let chosen = defaults.string(forKey: SettingsKey.cleanupModel)?.trimmingCharacters(in: .whitespaces) ?? ""
+            let model = chosen.isEmpty ? preset.chatModel : chosen
+            if !model.isEmpty {
+                return CloudChatModel(baseURL: cloudEndpoint.baseURL, model: model, apiKey: APIKeyStore.read(provider: preset.id), timeout: timeout)
+            }
+        }
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *), AppleIntelligenceModel.isAvailable { return AppleIntelligenceModel() }
+        #endif
+        return nil
     }
 
     /// Apple Intelligence on this Mac when available; otherwise the chat model set for the cloud provider, if any.

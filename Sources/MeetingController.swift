@@ -65,6 +65,9 @@ final class MeetingController {
             SettingsKey.meetingEchoCancellation: true,
             SettingsKey.meetingLength: MeetingLength.threeHours.rawValue,
             SettingsKey.meetingCalendar: false,
+            SettingsKey.meetingEngine: TranscriptionEngine.cloud.rawValue,
+            SettingsKey.meetingLanguage: MeetingLanguage.auto.rawValue,
+            SettingsKey.notesLanguage: NotesLanguage.english.rawValue,
         ])
         panel = MeetingPanelController(meetings: self)
         let workspace = NSWorkspace.shared.notificationCenter
@@ -283,7 +286,7 @@ final class MeetingController {
             return
         }
         do {
-            let heard = try await EngineSettings.transcribe(url)
+            let heard = try await EngineSettings.transcribeMeeting(url, context: context(before: segment))
             segment.text = heard.text.isEmpty || EngineSettings.cleanupMode == .off ? heard.text : LightCleanup.clean(heard.text)
             segment.provider = heard.provider
             segment.status = "done"
@@ -297,6 +300,13 @@ final class MeetingController {
             segment.errorMessage = error.localizedDescription
         }
         try? context.save()
+    }
+
+    /// The transcript just before a part, from the same speaker, to keep names and script consistent.
+    private func context(before segment: MeetingSegment) -> String {
+        let earlier = (segment.meeting?.orderedSegments ?? [])
+            .filter { $0.isDone && $0.speaker == segment.speaker && $0.start < segment.start && !$0.text.isEmpty }
+        return earlier.suffix(3).map(\.text).joined(separator: " ")
     }
 
     /// Writes notes once a stopped meeting has no chunks left to transcribe.
@@ -334,7 +344,7 @@ final class MeetingController {
                 : "No speech was recorded in this meeting."
             return
         }
-        guard let model = EngineSettings.languageModel(timeout: 180) else {
+        guard let model = EngineSettings.meetingModel() else {
             meeting.notesError = Self.noModelMessage
             return
         }
@@ -342,7 +352,7 @@ final class MeetingController {
         defer { writingNotes.remove(meeting.uuid) }
         meeting.notesError = nil
         do {
-            let notes = try await MeetingNotesWriter(model: model)
+            let notes = try await MeetingNotesWriter(model: model, language: notesLanguage)
                 .write(lines: lines, userNotes: meeting.userNotes, attendees: meeting.attendees)
             if meeting.calendarTitle == nil, let title = notes.title { meeting.title = title }
             meeting.summary = notes.summary.isEmpty ? nil : notes.summary
@@ -366,7 +376,11 @@ final class MeetingController {
         }
     }
 
-    static let noModelMessage = "Turn on AI notes to get a summary and action items: they use Apple Intelligence on this Mac, or a chat model with your key (Settings › Meetings)."
+    static let noModelMessage = "Add a cloud key in Settings to get a summary, action items and answers (Groq's free tier works), or use a Mac with Apple Intelligence."
+
+    private var notesLanguage: NotesLanguage {
+        NotesLanguage(rawValue: defaults.string(forKey: SettingsKey.notesLanguage) ?? "") ?? .english
+    }
 
     /// Keeps finished items, and replaces the open ones with the new list.
     private func replaceActionItems(of meeting: Meeting, with items: [String]) {
@@ -399,7 +413,7 @@ final class MeetingController {
 
     /// Answers a question about one meeting from its notes and transcript.
     func ask(_ question: String, about meeting: Meeting) async throws -> String {
-        guard let model = EngineSettings.languageModel(timeout: 120) else { throw FlowError.api(Self.noModelMessage) }
+        guard let model = EngineSettings.meetingModel(timeout: 120) else { throw FlowError.api(Self.noModelMessage) }
         var head = "Meeting: \(meeting.title), \(meeting.createdAt.formatted(date: .abbreviated, time: .shortened))\n"
         if !meeting.attendees.isEmpty { head += "Attendees: \(meeting.attendees.joined(separator: ", "))\n" }
         if let summary = meeting.summary { head += "Summary: \(summary)\n" }
@@ -576,6 +590,7 @@ final class MeetingController {
 /// the model's window (Apple Intelligence's is small).
 struct MeetingNotesWriter {
     let model: LanguageModel
+    var language: NotesLanguage = .english
 
     func write(lines: [MeetingLine], userNotes: String, attendees: [String]) async throws -> MeetingNotes {
         var header = attendees.isEmpty ? "" : "Attendees: \(attendees.joined(separator: ", "))\n\n"
@@ -598,7 +613,7 @@ struct MeetingNotesWriter {
             label = "Notes taken on each part of the meeting, in order"
         }
         let body = material.first ?? ""
-        let reply = try await model.respond(instructions: MeetingNotes.instructions,
+        let reply = try await model.respond(instructions: MeetingNotes.instructions(language: language),
                                             prompt: header + "\(label):\n\n\(body)\n\n\(MeetingNotes.format)")
         return MeetingNotes.parse(reply)
     }
