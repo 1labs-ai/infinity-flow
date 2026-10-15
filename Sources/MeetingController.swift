@@ -45,6 +45,23 @@ final class MeetingController {
     @ObservationIgnored private var callSeenSince: Date?
     @ObservationIgnored private var offeredForCall = false
     @ObservationIgnored private var warnedAboutLength = false
+    @ObservationIgnored private var warnedAboutAudio = false
+    /// Why the recorder can't hear a track, shown in the panel and the meeting until it is fixed.
+    private(set) var audioProblem: AudioProblem?
+
+    enum AudioProblem: Equatable {
+        /// The call track is perfectly silent while another app plays audio: System Audio Recording is off.
+        case cantHearCall
+        /// The mic track is perfectly silent: the input is muted, disconnected or blocked.
+        case cantHearMic
+
+        var message: String {
+            switch self {
+            case .cantHearCall: "Infinity Flow can't hear the call. Allow it under System Audio Recording, then start again."
+            case .cantHearMic: "Your microphone is silent. Check that it isn't muted and is the selected input."
+            }
+        }
+    }
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     /// A stop this soon after starting is taken as part of the click that started the meeting.
@@ -66,7 +83,7 @@ final class MeetingController {
             SettingsKey.meetingLength: MeetingLength.threeHours.rawValue,
             SettingsKey.meetingCalendar: false,
             SettingsKey.meetingEngine: TranscriptionEngine.cloud.rawValue,
-            SettingsKey.meetingLanguage: MeetingLanguage.auto.rawValue,
+            SettingsKey.speechLanguage: SpeechLanguage.auto.rawValue,
             SettingsKey.notesLanguage: NotesLanguage.english.rawValue,
         ])
         panel = MeetingPanelController(meetings: self)
@@ -150,6 +167,8 @@ final class MeetingController {
         callApp = app
         callGoneSince = nil
         warnedAboutLength = false
+        warnedAboutAudio = false
+        audioProblem = nil
         phase = .recording
         notice = nil
         if let warning { show(notice: warning, duration: 8) }
@@ -547,6 +566,7 @@ final class MeetingController {
                     return
                 }
             }
+            checkAudio()
             let limit = (MeetingLength(rawValue: defaults.integer(forKey: SettingsKey.meetingLength)) ?? .threeHours)
             let elapsed = clock.elapsed()
             if elapsed >= limit.seconds {
@@ -557,6 +577,26 @@ final class MeetingController {
             }
         case .finishing:
             break
+        }
+    }
+
+    /// Notices a track that hears nothing at all, which means a muted device or a missing permission.
+    private func checkAudio() {
+        guard phase == .recording, tracks.count == 2 else { return }
+        let problem: AudioProblem?
+        if tracks[1].digitalSilence >= 6, AudioObjects.otherAppsPlayingAudio() {
+            problem = .cantHearCall
+        } else if tracks[0].digitalSilence >= 8 {
+            problem = .cantHearMic
+        } else {
+            problem = nil
+        }
+        if problem != audioProblem {
+            audioProblem = problem
+            if let problem, !warnedAboutAudio {
+                warnedAboutAudio = true
+                show(notice: problem.message, duration: 12)
+            }
         }
     }
 

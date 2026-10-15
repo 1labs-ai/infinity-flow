@@ -57,7 +57,10 @@ struct MeetingPanelView: View {
             } else if let app = meetings.detectedApp {
                 DetectionCard(app: app)
             }
-            if let notice = meetings.notice {
+            if meetings.isRecording, let problem = meetings.audioProblem {
+                ProblemCard(problem: problem)
+            }
+            if let notice = meetings.notice, notice != meetings.audioProblem?.message {
                 NoticeCard(text: notice, meeting: meetings.noticeMeeting)
             }
         }
@@ -178,6 +181,24 @@ private struct NoticeCard: View {
             }
             Button { meetings.dismissNotice() } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }
                 .buttonStyle(.plain).foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(width: 320)
+        .modifier(PanelBackground())
+    }
+}
+
+private struct ProblemCard: View {
+    let problem: MeetingController.AudioProblem
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: problem == .cantHearCall ? "speaker.slash.fill" : "mic.slash.fill").foregroundStyle(.orange)
+            Text(problem.message).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button("Fix") {
+                if problem == .cantHearCall { Permissions.openSystemAudioSettings() } else { Permissions.openSoundInputSettings() }
+            }
+            .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(red: 1, green: 0.7, blue: 0.25))
         }
         .frame(width: 320)
         .modifier(PanelBackground())

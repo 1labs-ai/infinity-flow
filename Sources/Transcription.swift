@@ -7,6 +7,14 @@ enum FlowError: LocalizedError {
     case missingAPIKey
     case api(String)
 
+    /// The provider doesn't have this model (anymore) for this key.
+    var isMissingModel: Bool {
+        guard case .api(let message) = self else { return false }
+        let lowered = message.lowercased()
+        return lowered.contains("does not exist") || lowered.contains("decommissioned") || lowered.contains("model_not_found")
+            || lowered.contains("not found") && lowered.contains("model")
+    }
+
     var errorDescription: String? {
         switch self {
         case .noMicrophone: "No microphone is available."
@@ -162,21 +170,38 @@ enum EngineSettings {
         let provider: String?
     }
 
-    /// Transcribes with the engine chosen in Settings. No cleanup is applied.
+    /// Transcribes a dictation with the engine and language chosen in Settings. No cleanup is applied.
     static func transcribe(_ audio: URL) async throws -> Heard {
         let engine = engine
+        let language = speechLanguage
         switch engine {
         case .onDevice:
-            let raw = try await AppleSpeechTranscriber().transcribe(audio)
+            let raw = try await AppleSpeechTranscriber(locale: language.locale).transcribe(audio)
             return Heard(text: TranscriptText.clean(raw) ?? "", engine: engine, provider: nil)
         case .cloud:
             let preset = preset
             let key = APIKeyStore.read(provider: preset.id)
             if preset.requiresKey, key == nil { throw FlowError.missingAPIKey }
             let endpoint = cloudEndpoint
-            let raw = try await CloudTranscriber(baseURL: endpoint.baseURL, model: endpoint.model, apiKey: key).transcribe(audio)
+            let raw = try await CloudTranscriber(baseURL: endpoint.baseURL, model: transcriptionModel(for: language), apiKey: key,
+                                                 language: language.whisperLanguage,
+                                                 prompt: SpeechLanguage.prompt(style: language.stylePrompt, context: "")).transcribe(audio)
             return Heard(text: TranscriptText.clean(raw) ?? "", engine: engine, provider: preset.id)
         }
+    }
+
+    /// For AI polish of dictation: a large cloud model when a key is set (it understands Hinglish and
+    /// self-corrections far better), otherwise Apple Intelligence on this Mac, otherwise the chat model set by hand.
+    static func polishModel() -> LanguageModel? {
+        if cloudReady, let model = meetingModel(timeout: 15), model is CloudChatModel { return model }
+        return languageModel(timeout: 15)
+    }
+
+    /// English-only speech uses the provider's fast model; anything else uses its multilingual model, because
+    /// fast distilled models tend to translate Hindi into English instead of writing down what was said.
+    static func transcriptionModel(for language: SpeechLanguage) -> String {
+        guard language != .english, let multilingual = preset.multilingualModel, preset != .custom else { return cloudEndpoint.model }
+        return multilingual
     }
 
     /// Whether a cloud provider is ready to use: a key for providers that need one, a server for Custom.
@@ -191,14 +216,14 @@ enum EngineSettings {
         return chosen == .cloud && cloudReady ? .cloud : .onDevice
     }
 
-    static var meetingLanguage: MeetingLanguage {
-        MeetingLanguage(rawValue: defaults.string(forKey: SettingsKey.meetingLanguage) ?? "") ?? .auto
+    static var speechLanguage: SpeechLanguage {
+        SpeechLanguage(rawValue: defaults.string(forKey: SettingsKey.speechLanguage) ?? "") ?? .auto
     }
 
     /// Transcribes one part of a meeting. `context` is the transcript just before it, which keeps names,
     /// spelling and script (Devanagari or Roman) consistent from part to part.
     static func transcribeMeeting(_ audio: URL, context: String) async throws -> Heard {
-        let language = meetingLanguage
+        let language = speechLanguage
         switch meetingEngine {
         case .onDevice:
             let raw = try await AppleSpeechTranscriber(locale: language.locale).transcribe(audio)
@@ -206,9 +231,11 @@ enum EngineSettings {
         case .cloud:
             let preset = preset
             let endpoint = cloudEndpoint
-            let transcriber = CloudTranscriber(baseURL: endpoint.baseURL, model: endpoint.model, apiKey: APIKeyStore.read(provider: preset.id),
+            // With automatic detection, earlier parts (possibly in another language) would steer this one, so context
+            // is only sent once the language is known.
+            let transcriber = CloudTranscriber(baseURL: endpoint.baseURL, model: transcriptionModel(for: language), apiKey: APIKeyStore.read(provider: preset.id),
                                                language: language.whisperLanguage,
-                                               prompt: MeetingLanguage.prompt(style: language.stylePrompt, context: context))
+                                               prompt: SpeechLanguage.prompt(style: language.stylePrompt, context: language == .auto ? "" : context))
             let raw = try await transcriber.transcribe(audio)
             return Heard(text: TranscriptText.clean(raw) ?? "", engine: .cloud, provider: preset.id)
         }
@@ -221,7 +248,8 @@ enum EngineSettings {
             let chosen = defaults.string(forKey: SettingsKey.cleanupModel)?.trimmingCharacters(in: .whitespaces) ?? ""
             let model = chosen.isEmpty ? preset.chatModel : chosen
             if !model.isEmpty {
-                return CloudChatModel(baseURL: cloudEndpoint.baseURL, model: model, apiKey: APIKeyStore.read(provider: preset.id), timeout: timeout)
+                return CloudChatModel(baseURL: cloudEndpoint.baseURL, model: model, apiKey: APIKeyStore.read(provider: preset.id),
+                                      timeout: timeout, fallbacks: preset.chatModels)
             }
         }
         #if canImport(FoundationModels)

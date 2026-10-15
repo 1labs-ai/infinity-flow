@@ -66,6 +66,16 @@ final class TrackRecorder: @unchecked Sendable {
     /// Levels are reported about 20 times a second rather than for every buffer.
     private var levelPeak: Float = 0
     private var levelSeconds: Double = 0
+    /// Seconds of exact digital silence since the track started, while it has never carried any sound. A muted or
+    /// blocked device delivers only zeros; a working one carries some sound sooner or later.
+    private var zeroSeconds: Double = 0
+    private var everHeard = false
+    private(set) var digitalSilence: Double {
+        get { silenceLock.withLock { _digitalSilence } }
+        set { silenceLock.withLock { _digitalSilence = newValue } }
+    }
+    private var _digitalSilence: Double = 0
+    private let silenceLock = OSAllocatedUnfairLock()
 
     /// Called on the recorder's queue when a chunk is finished.
     var onChunk: ((MeetingChunk) -> Void)?
@@ -86,8 +96,13 @@ final class TrackRecorder: @unchecked Sendable {
         guard let samples = Self.mono(buffer, channel: channel) else { return }
         let rate = buffer.format.sampleRate
         let now = clock.elapsed()
-        let level = AudioLevel.normalized(rms: samples.withUnsafeBufferPointer { AudioLevel.rms($0) })
+        let rms = samples.withUnsafeBufferPointer { AudioLevel.rms($0) }
+        let level = AudioLevel.normalized(rms: rms)
         queue.async { [self] in
+            // Only a track that has never carried any sound counts: quiet moments in a call are exact zeros too.
+            if rms > 0 { everHeard = true }
+            zeroSeconds = everHeard ? 0 : zeroSeconds + Double(samples.count) / rate
+            digitalSilence = zeroSeconds
             reportLevel(level, seconds: Double(samples.count) / rate)
             write(samples, rate: rate, level: level, endingAt: now)
         }
@@ -413,6 +428,33 @@ enum AudioObjects {
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr, let value else { return nil }
         return value.takeRetainedValue() as String
+    }
+
+    /// Whether another app is playing audio right now.
+    static func otherAppsPlayingAudio() -> Bool {
+        processObjects().contains { object in
+            guard let pid = value(object, kAudioProcessPropertyPID, as: pid_t.self), pid != getpid() else { return false }
+            return (value(object, kAudioProcessPropertyIsRunningOutput, as: UInt32.self) ?? 0) != 0
+        }
+    }
+
+    private static func processObjects() -> [AudioObjectID] {
+        var address = address(kAudioHardwarePropertyProcessObjectList)
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &objects) == noErr else { return [] }
+        return objects
+    }
+
+    private static func value<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, as: T.Type) -> T? {
+        var address = address(selector)
+        var size = UInt32(MemoryLayout<T>.size)
+        let pointer = UnsafeMutableRawPointer.allocate(byteCount: MemoryLayout<T>.size, alignment: MemoryLayout<T>.alignment)
+        defer { pointer.deallocate() }
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, pointer) == noErr else { return nil }
+        return pointer.load(as: T.self)
     }
 
     /// Other apps that are recording from a microphone right now, by bundle ID.

@@ -13,6 +13,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.playSounds) private var playSounds = true
     @AppStorage(SettingsKey.restoreClipboard) private var restoreClipboard = true
     @AppStorage(SettingsKey.showInDock) private var showInDock = true
+    @AppStorage(SettingsKey.speechLanguage) private var speechLanguage = SpeechLanguage.auto.rawValue
+    @AppStorage(SettingsKey.meetingEngine) private var meetingEngine = TranscriptionEngine.cloud.rawValue
     private var _transcripts = Query<Transcript, [Transcript]>()
     private var transcripts: [Transcript] { _transcripts.wrappedValue }
     private var _meetings = Query<Meeting, [Meeting]>()
@@ -22,6 +24,7 @@ struct SettingsView: View {
     @State private var testing = false
 
     private var preset: CloudPreset { CloudPreset.preset(id: presetID) }
+    private var keyReady: Bool { preset == .custom ? !customBaseURL.isEmpty : !apiKey.trimmed.isEmpty }
     private var usesCloud: Bool { engine == TranscriptionEngine.cloud.rawValue }
 
     var body: some View {
@@ -39,6 +42,11 @@ struct SettingsView: View {
                 Picker("Hold to talk", selection: $hotkey) {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Picker("Language you speak", selection: $speechLanguage) {
+                    ForEach(SpeechLanguage.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Text("Used for dictation and meetings. In the cloud, Hindi, English and mixed speech are all understood; on this Mac, choose the one you speak.")
+                    .font(.callout).foregroundStyle(.secondary)
                 .onChange(of: hotkey) { controller.applySettings() }
                 if hotkey == Hotkey.fn.rawValue {
                     HStack {
@@ -138,6 +146,19 @@ struct SettingsView: View {
         if let testResult {
             Text(testResult).font(.callout).foregroundStyle(testResult == "Connected" ? .green : .orange)
         }
+        if keyReady, !usesCloud || cleanupMode != CleanupMode.ai.rawValue || meetingEngine != TranscriptionEngine.cloud.rawValue {
+            HStack {
+                Text("Get Wispr-quality results: \(preset.title) for dictation, AI polish and meetings.")
+                    .font(.callout)
+                Spacer()
+                Button("Use \(preset.title) for everything") {
+                    engine = TranscriptionEngine.cloud.rawValue
+                    cleanupMode = CleanupMode.ai.rawValue
+                    meetingEngine = TranscriptionEngine.cloud.rawValue
+                }
+                .buttonStyle(.ink)
+            }
+        }
         HStack {
             Text(preset.note).font(.callout).foregroundStyle(.secondary)
             Spacer()
@@ -165,7 +186,7 @@ private struct MeetingsSettingsSection: View {
     @AppStorage(SettingsKey.meetingCalendar) private var useCalendar = false
     @AppStorage(SettingsKey.cleanupModel) private var chatModel = ""
     @AppStorage(SettingsKey.meetingEngine) private var meetingEngine = TranscriptionEngine.cloud.rawValue
-    @AppStorage(SettingsKey.meetingLanguage) private var meetingLanguage = MeetingLanguage.auto.rawValue
+    @AppStorage(SettingsKey.speechLanguage) private var speechLanguage = SpeechLanguage.auto.rawValue
     @AppStorage(SettingsKey.notesLanguage) private var notesLanguage = NotesLanguage.english.rawValue
     @State private var calendarDenied = false
     @State private var usage = MeetingStore.usage()
@@ -175,9 +196,6 @@ private struct MeetingsSettingsSection: View {
             Picker("Transcribe meetings", selection: $meetingEngine) {
                 Text("In the cloud, with your key (best; any language)").tag(TranscriptionEngine.cloud.rawValue)
                 Text("On this Mac (private; one language)").tag(TranscriptionEngine.onDevice.rawValue)
-            }
-            Picker("Meeting language", selection: $meetingLanguage) {
-                ForEach(MeetingLanguage.allCases) { Text($0.title).tag($0.rawValue) }
             }
             Picker("Write notes in", selection: $notesLanguage) {
                 ForEach(NotesLanguage.allCases) { Text($0.title).tag($0.rawValue) }

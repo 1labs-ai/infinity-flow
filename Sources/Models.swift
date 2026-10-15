@@ -264,6 +264,6 @@ enum SettingsKey {
     static let meetingLength = "meetingLength"
     static let meetingCalendar = "meetingCalendar"
     static let meetingEngine = "meetingEngine"
-    static let meetingLanguage = "meetingLanguage"
+    static let speechLanguage = "speechLanguage"
     static let notesLanguage = "notesLanguage"
 }

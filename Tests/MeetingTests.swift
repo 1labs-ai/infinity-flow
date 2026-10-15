@@ -171,15 +171,15 @@ final class MeetingTests: XCTestCase {
     }
 
     func testMeetingLanguagePrompt() {
-        XCTAssertNil(MeetingLanguage.prompt(style: nil, context: ""))
-        XCTAssertEqual(MeetingLanguage.prompt(style: "Haan toh", context: "Priya will send it"), "Haan toh Priya will send it")
+        XCTAssertNil(SpeechLanguage.prompt(style: nil, context: ""))
+        XCTAssertEqual(SpeechLanguage.prompt(style: "Haan toh", context: "Priya will send it"), "Haan toh Priya will send it")
         let long = String(repeating: "word ", count: 200)
-        let prompt = MeetingLanguage.prompt(style: "Style.", context: long, limit: 60)!
+        let prompt = SpeechLanguage.prompt(style: "Style.", context: long, limit: 60)!
         XCTAssertLessThanOrEqual(prompt.count, 60)
         XCTAssertTrue(prompt.hasPrefix("Style. word"), "keeps whole words from the end of the context")
-        XCTAssertEqual(MeetingLanguage.hinglish.whisperLanguage, nil, "mixed speech is detected, not forced")
-        XCTAssertEqual(MeetingLanguage.hindi.whisperLanguage, "hi")
-        XCTAssertEqual(MeetingLanguage.hindi.locale.language.languageCode?.identifier, "hi")
+        XCTAssertEqual(SpeechLanguage.hinglish.whisperLanguage, nil, "mixed speech is detected, not forced")
+        XCTAssertEqual(SpeechLanguage.hindi.whisperLanguage, "hi")
+        XCTAssertEqual(SpeechLanguage.hindi.locale.language.languageCode?.identifier, "hi")
     }
 
     func testParsesBoldLabelsAndNoActionItems() {
