@@ -353,7 +353,7 @@ enum MeetingApps {
 }
 
 /// The language people speak in meetings, which steers transcription.
-enum MeetingLanguage: String, CaseIterable, Identifiable {
+enum SpeechLanguage: String, CaseIterable, Identifiable {
     case auto, english, hindi, hinglish
 
     var id: String { rawValue }

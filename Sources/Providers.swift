@@ -14,20 +14,27 @@ struct CloudPreset: Identifiable, Hashable {
     let keyPage: URL?
     let requiresKey: Bool
     let note: String
-    /// A capable chat model on the same provider, used for meeting notes when no chat model is set.
-    var chatModel: String = ""
+    /// Capable chat models on the same provider, best first, used for meeting notes and AI polish when no chat
+    /// model is set. Providers retire models, so the first one that exists for the key is used.
+    var chatModels: [String] = []
+    /// A transcription model that transcribes Hindi and other languages as spoken instead of translating them.
+    var multilingualModel: String?
+
+    var chatModel: String { chatModels.first ?? "" }
 
     static let groq = CloudPreset(
         id: "groq", title: "Groq", baseURL: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo",
         ratePerMinute: 0.04 / 60, minimumBilledSeconds: 10, keyPage: URL(string: "https://console.groq.com/keys"),
         requiresKey: true, note: "Fastest. The free tier covers most people; after that about $0.04 per hour of audio.",
-        chatModel: "llama-3.3-70b-versatile")
+        chatModels: ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "meta-llama/llama-4-maverick-17b-128e-instruct",
+                     "qwen/qwen3-32b", "llama-3.1-8b-instant"],
+        multilingualModel: "whisper-large-v3")
 
     static let openAI = CloudPreset(
         id: "openai", title: "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini-transcribe",
         ratePerMinute: 0.003, minimumBilledSeconds: 0, keyPage: URL(string: "https://platform.openai.com/api-keys"),
         requiresKey: true, note: "About $0.003 per minute of audio.",
-        chatModel: "gpt-4.1-mini")
+        chatModels: ["gpt-4.1-mini", "gpt-4o-mini"])
 
     static let custom = CloudPreset(
         id: "custom", title: "Custom (OpenAI-compatible)", baseURL: "", model: "",

@@ -231,7 +231,7 @@ final class FlowController {
             }
             let audio = Store.keepRecording(recording.url)
             do {
-                let result = try await transcribe(audio)
+                let result = try await transcribe(audio, app: app)
                 guard !result.text.isEmpty else {
                     Store.deleteRecording(audio)
                     show(error: "We couldn't hear you. Is your microphone muted?")
@@ -289,21 +289,23 @@ final class FlowController {
         let provider: String?
     }
 
-    private func transcribe(_ audio: URL) async throws -> TranscriptionResult {
+    private func transcribe(_ audio: URL, app: String? = nil) async throws -> TranscriptionResult {
         let heard = try await EngineSettings.transcribe(audio)
-        return TranscriptionResult(text: await cleanUp(heard.text), raw: heard.text, engine: heard.engine, provider: heard.provider)
+        return TranscriptionResult(text: await cleanUp(heard.text, app: app), raw: heard.text, engine: heard.engine, provider: heard.provider)
     }
 
-    private func cleanUp(_ text: String) async -> String {
+    private func cleanUp(_ text: String, app: String?) async -> String {
         guard !text.isEmpty else { return text }
         let mode = EngineSettings.cleanupMode
         guard mode != .off else { return text }
         let light = LightCleanup.clean(text)
-        guard mode == .ai, let model = EngineSettings.languageModel(),
-              let polished = try? await model.respond(instructions: CleanupGuard.instructions, prompt: light),
-              CleanupGuard.isSafe(original: text, cleaned: polished)
+        // The model gets what was actually said, so it can see self-corrections and fillers in context.
+        guard mode == .ai, let model = EngineSettings.polishModel(),
+              let polished = try? await model.respond(instructions: CleanupGuard.instructions, prompt: CleanupGuard.prompt(text, app: app)),
+              case let reply = CleanupGuard.reply(polished),
+              CleanupGuard.isSafe(original: text, cleaned: reply)
         else { return light }
-        return polished.trimmingCharacters(in: .whitespacesAndNewlines)
+        return reply
     }
 
     // MARK: - Helpers
