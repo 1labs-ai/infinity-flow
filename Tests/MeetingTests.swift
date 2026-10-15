@@ -155,12 +155,14 @@ final class MeetingTests: XCTestCase {
             - Priya: finish the pricing page
             - [ ] You: send the release notes
             2. Book the launch room
+            - Team - meet again on Monday. - None
             """
         let notes = MeetingNotes.parse(reply)
         XCTAssertEqual(notes.title, "Q3 launch planning")
         XCTAssertEqual(notes.summary, "The team agreed to ship on Friday. It needs one more review.")
         XCTAssertEqual(notes.notes, "## Timeline\n- Ship on Friday, 12 October\n## Risks\n- Pricing page isn't ready")
-        XCTAssertEqual(notes.actionItems, ["Priya: finish the pricing page", "You: send the release notes", "Book the launch room"])
+        XCTAssertEqual(notes.actionItems, ["Priya: finish the pricing page", "You: send the release notes", "Book the launch room",
+                                           "Team - meet again on Monday."])
     }
 
     func testParsesBoldLabelsAndNoActionItems() {
@@ -207,6 +209,15 @@ final class MeetingTests: XCTestCase {
             .write(lines: [MeetingLine(speaker: "You", start: 0, text: "Quick sync.")], userNotes: "", attendees: ["Sam"])
         XCTAssertEqual(model.prompts.count, 1)
         XCTAssertTrue(model.prompts[0].prompt.hasPrefix("Attendees: Sam\n\nTranscript:\n\n[0:00] You: Quick sync."))
+    }
+
+    func testEchoOfTheCallIsDetected() {
+        let theirs = ["We should move the launch to Friday because the pricing page needs another review"]
+        XCTAssertTrue(EchoFilter.isEcho("move the launch to Friday, pricing page needs review", theirs: theirs))
+        XCTAssertFalse(EchoFilter.isEcho("Sounds good, I can take the pricing page", theirs: theirs), "a reply isn't an echo")
+        XCTAssertFalse(EchoFilter.isEcho("Yes, Friday", theirs: theirs), "too short to judge")
+        XCTAssertTrue(EchoFilter.overlaps(start: 10, end: 25, with: (24, 40)))
+        XCTAssertFalse(EchoFilter.overlaps(start: 10, end: 25, with: (30, 40)))
     }
 
     // MARK: - Asking

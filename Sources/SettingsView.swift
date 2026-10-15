@@ -25,6 +25,15 @@ struct SettingsView: View {
     private var usesCloud: Bool { engine == TranscriptionEngine.cloud.rawValue }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PageHeader("Settings", subtitle: "Dictation, meetings, engines and privacy.")
+                .padding(.horizontal, 40)
+                .padding(.top, 44)
+            form
+        }
+    }
+
+    private var form: some View {
         Form {
             Section("Dictation") {
                 Picker("Hold to talk", selection: $hotkey) {
@@ -97,7 +106,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Settings")
+        .scrollContentBackground(.hidden)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: 880)
         .onAppear { apiKey = APIKeyStore.read(provider: presetID) ?? "" }
         .onChange(of: presetID) {
             apiKey = APIKeyStore.read(provider: presetID) ?? ""
@@ -342,7 +353,7 @@ struct OnboardingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Welcome to Infinity Flow").font(.system(size: 28, weight: .bold))
+                Text("Welcome to Infinity Flow").font(Theme.display(32))
                 Text("Hold a key, speak, and your words appear wherever you're typing. Free, private, and on your Mac.")
                     .foregroundStyle(.secondary)
             }
@@ -353,12 +364,13 @@ struct OnboardingView: View {
             }
             .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button("Open Keyboard Settings") { Permissions.openKeyboardSettings() }
+                Button("Open Keyboard Settings") { Permissions.openKeyboardSettings() }.buttonStyle(.inkSecondary)
                 Spacer()
-                Button("Start Dictating", action: onDone).keyboardShortcut(.defaultAction)
+                Button("Start dictating", action: onDone).buttonStyle(.ink).keyboardShortcut(.defaultAction)
             }
         }
-        .padding(32)
-        .frame(width: 560)
+        .padding(36)
+        .frame(width: 580)
+        .background(Theme.page)
     }
 }
