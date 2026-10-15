@@ -15,6 +15,26 @@ enum Permissions {
         AXIsProcessTrusted()
     }
 
+    /// Input Monitoring: the hold-to-talk key is read with a listen-only event tap.
+    static var inputMonitoringGranted: Bool {
+        CGPreflightListenEventAccess()
+    }
+
+    static func requestInputMonitoring() {
+        _ = CGRequestListenEventAccess()
+    }
+
+    /// Clears this app's entry for a privacy service, then asks again. An entry left by an earlier build with a
+    /// different signature shows as switched on in System Settings but doesn't apply, and can't be switched on.
+    static func resetAndRequest(_ service: String, request: () -> Void) {
+        let reset = Process()
+        reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        reset.arguments = ["reset", service, Bundle.main.bundleIdentifier ?? "com.oneinfinitylabs.InfinityFlow"]
+        try? reset.run()
+        reset.waitUntilExit()
+        request()
+    }
+
     static func requestMicrophone() async -> Bool {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
