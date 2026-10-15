@@ -1,10 +1,45 @@
 import Foundation
 
+/// A sentence with its time from the start of a piece of audio.
+struct TimedText: Codable, Equatable {
+    var start: Double
+    var end: Double
+    var text: String
+}
+
+/// A sentence of one track, placed on the meeting's timeline.
+struct TrackLine: Equatable {
+    let speaker: MeetingSpeaker
+    let start: Double
+    let end: Double
+    let text: String
+    /// The part (and audio file) it came from.
+    var segment: UUID?
+
+    /// The sentences of a transcribed part. Parts without timestamps are one line.
+    static func lines(speaker: MeetingSpeaker, partStart: Double, partDuration: Double, text: String,
+                      timed: [TimedText]?, segment: UUID? = nil) -> [TrackLine] {
+        guard let timed, !timed.isEmpty else {
+            return text.isEmpty ? [] : [TrackLine(speaker: speaker, start: partStart, end: partStart + partDuration, text: text, segment: segment)]
+        }
+        return timed.map {
+            TrackLine(speaker: speaker, start: partStart + $0.start, end: partStart + $0.end, text: $0.text, segment: segment)
+        }
+    }
+
+    /// Both tracks merged into the order things were said, with echo of the call removed from your track.
+    static func conversation(_ lines: [TrackLine]) -> [TrackLine] {
+        EchoFilter.removeEcho(lines).sorted { $0.start == $1.start ? $0.speaker.rawValue < $1.speaker.rawValue : $0.start < $1.start }
+    }
+}
+
 /// One line of a meeting transcript, with the speaker's display name.
 struct MeetingLine: Equatable {
     let speaker: String
     let start: Double
     let text: String
+    /// The part (and audio file) it came from.
+    var segment: UUID? = nil
 
     var formatted: String { "[\(MeetingFormat.timestamp(start))] \(speaker): \(text)" }
 }
@@ -145,7 +180,10 @@ struct MeetingNotes: Equatable {
         or a mix of both (Hinglish), in Devanagari or Roman letters. The transcript has recognition errors: work out \
         what was meant from context, and never copy an obviously misheard word into the notes. \
         Be accurate and specific: keep every decision, number, date, name, product and owner that was said, and \
-        never invent any. Leave out small talk. \(language.instruction)
+        never invent any. The transcript is in the order things were said; use it to tell who answered what. \
+        Only call someone by a name or role (such as "the manager") if the transcript says it; otherwise use "You" \
+        or "Others". An owner of a task is whoever agreed to do it or was asked by name. Leave out small talk. \
+        \(language.instruction)
         """
     }
 
@@ -256,19 +294,68 @@ enum EchoFilter {
         let words = soundKeys(mine)
         guard words.count >= 3 else { return false }
         let heard = theirs.reduce(into: Set<String>()) { $0.formUnion(soundKeys($1)) }
-        return Double(words.intersection(heard).count) / Double(words.count) >= 0.5
+        let matched = words.filter { word in heard.contains(word) || heard.contains { sounded(word, like: $0) } }
+        return Double(matched.count) / Double(words.count) >= 0.5
     }
 
-    /// A rough sound key per word: Latin letters, no accents, no vowels, no doubled letters
-    /// ("नमस्ते" and "Namaste" both become "nmst").
+    /// Near matches: the same word transliterated slightly differently ("hmpj"/"hmpg", "dsjn"/"djn").
+    private static func sounded(_ a: String, like b: String) -> Bool {
+        guard a.count >= 4, b.count >= 4, abs(a.count - b.count) <= 1 else { return false }
+        return editDistance(Array(a), Array(b)) <= 1
+    }
+
+    private static func editDistance(_ a: [Character], _ b: [Character]) -> Int {
+        var previous = Array(0...b.count)
+        for (i, x) in a.enumerated() {
+            var current = [i + 1]
+            for (j, y) in b.enumerated() {
+                current.append(min(previous[j + 1] + 1, current[j] + 1, previous[j] + (x == y ? 0 : 1)))
+            }
+            previous = current
+        }
+        return previous[b.count]
+    }
+
+    /// A rough sound key per word: Latin letters, no accents, no vowels, letters that transliteration swaps
+    /// merged (g/j/z, c/k/q, w/v), no doubled letters ("नमस्ते" and "Namaste" both become "nmst").
     static func soundKeys(_ text: String) -> Set<String> {
         let latin = (text.applyingTransform(.toLatin, reverse: false) ?? text)
             .applyingTransform(.stripDiacritics, reverse: false)?.lowercased() ?? text.lowercased()
         return Set(latin.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).compactMap { word -> String? in
             var key = ""
-            for character in word where !"aeiouy'".contains(character) && key.last != character { key.append(character) }
+            for raw in word where !"aeiouyh'".contains(raw) {
+                let character: Character = switch raw {
+                case "g", "z": "j"
+                case "c", "q": "k"
+                case "w": "v"
+                default: raw
+                }
+                if key.last != character { key.append(character) }
+            }
             return key.count >= 2 ? key : nil
         })
+    }
+
+    /// Drops your sentences that only repeat a sentence others said at the same time. Done per sentence, so your own
+    /// words in the same part are kept.
+    static func removeEcho(_ lines: [TrackLine]) -> [TrackLine] {
+        let theirs = lines.filter { $0.speaker == .others }
+        return lines.filter { line in
+            guard line.speaker == .you else { return true }
+            let overlapping = theirs.filter { overlaps(start: line.start, end: line.end, with: ($0.start, $0.end)) }
+            guard !overlapping.isEmpty, coverage(of: line, by: overlapping) >= 0.5 else { return true }
+            return !isEcho(line.text, theirs: overlapping.map(\.text))
+        }
+    }
+
+    /// How much of a line's time others were speaking. An echo plays at the same moment; a reply comes after.
+    static func coverage(of line: TrackLine, by others: [TrackLine]) -> Double {
+        let length = line.end - line.start
+        guard length > 0 else { return 1 }
+        let covered = others.reduce(0.0) { total, other in
+            total + max(0, min(line.end, other.end + 1) - max(line.start, other.start - 1))
+        }
+        return min(covered / length, 1)
     }
 
     /// Others' parts that overlap a part spanning `start..<end`, with a little slack for chunk boundaries.
@@ -316,7 +403,8 @@ enum MeetingContext {
         The transcript comes from speech recognition and may mix English and Hindi (Hinglish) with recognition errors; \
         work out what was meant. Answer in the same language as the question (Hindi, Hinglish or English). Be specific \
         and brief, quote numbers, dates and names exactly, and say who said what when it matters. If the meeting \
-        doesn't answer the question, say so plainly instead of guessing.
+        doesn't answer the question, say so plainly instead of guessing. Never give people names or roles the \
+        transcript doesn't give them.
         """
 }
 
@@ -357,6 +445,14 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
     case auto, english, hindi, hinglish
 
     var id: String { rawValue }
+
+    /// In India, meetings switch between Hindi and English mid-sentence. Whisper's detection picks one language per
+    /// part and translates the other, so mixed speech is the better default there.
+    static var forThisMac: SpeechLanguage { forRegion(Locale.current.region) }
+
+    static func forRegion(_ region: Locale.Region?) -> SpeechLanguage {
+        region == .india ? .hinglish : .auto
+    }
 
     var title: String {
         switch self {

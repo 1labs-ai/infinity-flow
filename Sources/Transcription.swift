@@ -91,12 +91,51 @@ struct CloudTranscriber: Transcriber {
     var session: URLSession = .shared
 
     func transcribe(_ audio: URL) async throws -> String {
+        try await request(audio, format: "json").text
+    }
+
+    /// Transcribes with a timestamp for each sentence, so a meeting's turns can be put in the order they were said.
+    /// Sentences the model itself rates as probably not speech (Whisper's invented "Thank you." on noise) are dropped.
+    /// Servers without timestamps get a single line.
+    func transcribeTimed(_ audio: URL) async throws -> (text: String, lines: [TimedText]?) {
+        let result: Response
+        do {
+            result = try await request(audio, format: "verbose_json")
+        } catch FlowError.api(let message) where message.contains("HTTP 400") || message.lowercased().contains("response_format") {
+            return (try await request(audio, format: "json").text, nil)
+        }
+        guard let segments = result.segments else { return (result.text, nil) }
+        let lines = segments.filter { !$0.isLikelyNotSpeech }.map {
+            TimedText(start: $0.start, end: $0.end, text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }.filter { !$0.text.isEmpty }
+        return (lines.map(\.text).joined(separator: " "), lines)
+    }
+
+    struct Response: Decodable {
+        struct Segment: Decodable {
+            let start: Double
+            let end: Double
+            let text: String
+            let no_speech_prob: Double?
+            let avg_logprob: Double?
+
+            /// Whisper's own signals for a sentence made up from silence or noise.
+            var isLikelyNotSpeech: Bool {
+                (no_speech_prob ?? 0) > 0.6 && (avg_logprob ?? 0) < -0.8
+            }
+        }
+        let text: String
+        let segments: [Segment]?
+    }
+
+    private func request(_ audio: URL, format: String) async throws -> Response {
         guard let url = CloudPreset.endpoint(base: baseURL, path: "/audio/transcriptions") else {
             throw FlowError.api("Set a server URL in Settings › Transcription.")
         }
         var body = MultipartBody()
         body.addField("model", model)
-        body.addField("response_format", "json")
+        body.addField("response_format", format)
+        if format == "verbose_json" { body.addField("timestamp_granularities[]", "segment") }
         if let language { body.addField("language", language) }
         if let prompt, !prompt.isEmpty { body.addField("prompt", prompt) }
         body.addFile("file", filename: "speech.wav", mimeType: "audio/wav", contents: try Data(contentsOf: audio))
@@ -109,9 +148,11 @@ struct CloudTranscriber: Transcriber {
 
         let (data, response) = try await session.upload(for: request, from: body.finalized())
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        struct Success: Decodable { let text: String }
-        guard status == 200 else { throw FlowError.api(Self.errorMessage(status: status, data: data)) }
-        return try JSONDecoder().decode(Success.self, from: data).text
+        guard status == 200 else {
+            let message = Self.errorMessage(status: status, data: data)
+            throw FlowError.api(status == 400 && !message.contains("HTTP") ? "\(message) (HTTP 400)" : message)
+        }
+        return try JSONDecoder().decode(Response.self, from: data)
     }
 
     /// Checks the server and key without sending audio, using `GET /models`.
@@ -168,6 +209,8 @@ enum EngineSettings {
         let engine: TranscriptionEngine
         /// Cloud preset ID, or `nil` when transcribed on this Mac.
         let provider: String?
+        /// Sentences with times from the start of the audio, when the engine provides them.
+        var lines: [TimedText]? = nil
     }
 
     /// Transcribes a dictation with the engine and language chosen in Settings. No cleanup is applied.
@@ -217,7 +260,7 @@ enum EngineSettings {
     }
 
     static var speechLanguage: SpeechLanguage {
-        SpeechLanguage(rawValue: defaults.string(forKey: SettingsKey.speechLanguage) ?? "") ?? .auto
+        SpeechLanguage(rawValue: defaults.string(forKey: SettingsKey.speechLanguage) ?? "") ?? .forThisMac
     }
 
     /// Transcribes one part of a meeting. `context` is the transcript just before it, which keeps names,
@@ -236,8 +279,8 @@ enum EngineSettings {
             let transcriber = CloudTranscriber(baseURL: endpoint.baseURL, model: transcriptionModel(for: language), apiKey: APIKeyStore.read(provider: preset.id),
                                                language: language.whisperLanguage,
                                                prompt: SpeechLanguage.prompt(style: language.stylePrompt, context: language == .auto ? "" : context))
-            let raw = try await transcriber.transcribe(audio)
-            return Heard(text: TranscriptText.clean(raw) ?? "", engine: .cloud, provider: preset.id)
+            let result = try await transcriber.transcribeTimed(audio)
+            return Heard(text: TranscriptText.clean(result.text) ?? "", engine: .cloud, provider: preset.id, lines: result.lines)
         }
     }
 

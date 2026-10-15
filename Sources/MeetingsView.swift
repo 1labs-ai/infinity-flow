@@ -472,29 +472,32 @@ private struct TranscriptTab: View {
     @State private var newName = ""
 
     var body: some View {
-        let segments = meeting.orderedSegments.filter { !$0.isDone || !$0.text.isEmpty }
+        let turns = MeetingFormat.turns(meeting.transcriptLines)
+        let waiting = meeting.orderedSegments.filter { !$0.isDone }
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if segments.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    if turns.isEmpty && waiting.isEmpty {
                         Text(live ? "Listening… The first lines appear after a few seconds of speech." : "No transcript yet.")
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(Array(segments.enumerated()), id: \.element.uuid) { index, segment in
-                        SegmentRow(meeting: meeting, segment: segment,
-                                   showSpeaker: index == 0 || segments[index - 1].speaker != segment.speaker) { speaker in
+                    ForEach(Array(turns.enumerated()), id: \.offset) { index, turn in
+                        TurnRow(meeting: meeting, turn: turn) { speaker in
                             newName = meeting.name(of: speaker)
                             renaming = speaker
                         }
-                        .id(segment.uuid)
+                        .id(index)
+                    }
+                    ForEach(waiting) { segment in
+                        WaitingRow(meeting: meeting, segment: segment)
                     }
                 }
                 .padding(.horizontal, 40)
                 .padding(.vertical, 28)
                 .frame(maxWidth: 840, alignment: .leading)
             }
-            .onChange(of: segments.count) {
-                if live, let last = segments.last { withAnimation { proxy.scrollTo(last.uuid, anchor: .bottom) } }
+            .onChange(of: turns.count) {
+                if live, turns.count > 0 { withAnimation { proxy.scrollTo(turns.count - 1, anchor: .bottom) } }
             }
         }
         .alert("Rename speaker", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -510,56 +513,61 @@ private struct TranscriptTab: View {
     }
 }
 
-private struct SegmentRow: View {
-    @Environment(MeetingController.self) private var meetings
+/// One speaker's turn: their consecutive sentences, with the time it started.
+private struct TurnRow: View {
     let meeting: Meeting
-    let segment: MeetingSegment
-    let showSpeaker: Bool
+    let turn: MeetingLine
     let rename: (MeetingSpeaker) -> Void
     @State private var hovering = false
 
+    private var speaker: MeetingSpeaker { turn.speaker == meeting.name(of: .you) ? .you : .others }
+    private var segment: MeetingSegment? { (meeting.segments ?? []).first { $0.uuid == turn.segment } }
     private var playback: AudioPlayback { .shared }
-    private var hasAudio: Bool { segment.audioURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if showSpeaker {
-                HStack(spacing: 8) {
-                    Menu(meeting.name(of: segment.meetingSpeaker)) {
-                        Button("Rename speaker…") { rename(segment.meetingSpeaker) }
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .fontWeight(.semibold)
-                    .foregroundStyle(segment.meetingSpeaker == .you ? Color.orange : Color.accentColor)
-                    Text(MeetingFormat.timestamp(segment.start)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            HStack(spacing: 8) {
+                Menu(turn.speaker) {
+                    Button("Rename speaker…") { rename(speaker) }
                 }
-            }
-            HStack(alignment: .top, spacing: 8) {
-                Group {
-                    if segment.isFailed {
-                        Label("Couldn't transcribe: \(segment.errorMessage ?? "unknown error")", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    } else if segment.isPending {
-                        Label("Transcribing…", systemImage: "waveform").foregroundStyle(.secondary)
-                    } else {
-                        Text(segment.text).textSelection(.enabled)
-                    }
-                }
-                Spacer(minLength: 8)
-                if hasAudio {
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .fontWeight(.semibold)
+                .foregroundStyle(speaker == .you ? Color.orange : Color.accentColor)
+                Text(MeetingFormat.timestamp(turn.start)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                if let segment, let url = segment.audioURL, FileManager.default.fileExists(atPath: url.path) {
                     let playing = playback.playingID == segment.uuid
-                    Button { playback.toggle(id: segment.uuid, url: segment.audioURL) } label: {
-                        Image(systemName: playing ? "stop.fill" : "play.fill").frame(width: 22, height: 18)
+                    Button { playback.toggle(id: segment.uuid, url: url) } label: {
+                        Image(systemName: playing ? "stop.fill" : "play.fill").font(.caption)
                     }
                     .buttonStyle(.borderless)
                     .help(playing ? "Stop audio" : "Play this part")
                     .opacity(hovering || playing ? 1 : 0)
                 }
             }
+            Text(turn.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
         .onHover { hovering = $0 }
+    }
+}
+
+/// A part still being transcribed, or one that failed.
+private struct WaitingRow: View {
+    let meeting: Meeting
+    let segment: MeetingSegment
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(meeting.name(of: segment.meetingSpeaker)).fontWeight(.semibold).foregroundStyle(.secondary)
+            Text(MeetingFormat.timestamp(segment.start)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            if segment.isFailed {
+                Label("Couldn't transcribe: \(segment.errorMessage ?? "unknown error")", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            } else {
+                Label("Transcribing…", systemImage: "waveform").foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

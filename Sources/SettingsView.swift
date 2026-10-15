@@ -13,7 +13,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.playSounds) private var playSounds = true
     @AppStorage(SettingsKey.restoreClipboard) private var restoreClipboard = true
     @AppStorage(SettingsKey.showInDock) private var showInDock = true
-    @AppStorage(SettingsKey.speechLanguage) private var speechLanguage = SpeechLanguage.auto.rawValue
+    @AppStorage(SettingsKey.speechLanguage) private var speechLanguage = SpeechLanguage.forThisMac.rawValue
     @AppStorage(SettingsKey.meetingEngine) private var meetingEngine = TranscriptionEngine.cloud.rawValue
     private var _transcripts = Query<Transcript, [Transcript]>()
     private var transcripts: [Transcript] { _transcripts.wrappedValue }
@@ -186,7 +186,7 @@ private struct MeetingsSettingsSection: View {
     @AppStorage(SettingsKey.meetingCalendar) private var useCalendar = false
     @AppStorage(SettingsKey.cleanupModel) private var chatModel = ""
     @AppStorage(SettingsKey.meetingEngine) private var meetingEngine = TranscriptionEngine.cloud.rawValue
-    @AppStorage(SettingsKey.speechLanguage) private var speechLanguage = SpeechLanguage.auto.rawValue
+    @AppStorage(SettingsKey.speechLanguage) private var speechLanguage = SpeechLanguage.forThisMac.rawValue
     @AppStorage(SettingsKey.notesLanguage) private var notesLanguage = NotesLanguage.english.rawValue
     @State private var calendarDenied = false
     @State private var usage = MeetingStore.usage()
