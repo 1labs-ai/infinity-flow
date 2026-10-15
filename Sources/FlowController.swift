@@ -248,9 +248,9 @@ final class FlowController {
                 transcript.pasted = await deliver(result.text)
                 try? container.mainContext.save()
             } catch {
-                let engine = currentEngine
+                let engine = EngineSettings.engine
                 let failed = Transcript(text: "", duration: recording.duration, engine: engine,
-                                        provider: engine == .cloud ? currentPreset.id : nil, appName: app)
+                                        provider: engine == .cloud ? EngineSettings.preset.id : nil, appName: app)
                 failed.status = "failed"
                 failed.audioFileName = audio.lastPathComponent
                 failed.errorMessage = error.localizedDescription
@@ -288,70 +288,21 @@ final class FlowController {
         let provider: String?
     }
 
-    private var currentEngine: TranscriptionEngine {
-        TranscriptionEngine(rawValue: defaults.string(forKey: SettingsKey.engine) ?? "") ?? .onDevice
-    }
-
-    private var currentPreset: CloudPreset {
-        CloudPreset.preset(id: defaults.string(forKey: SettingsKey.cloudPreset))
-    }
-
-    /// The base URL and model for the selected cloud preset; Custom reads them from Settings.
-    private var cloudEndpoint: (baseURL: String, model: String) {
-        let preset = currentPreset
-        guard preset == .custom else { return (preset.baseURL, preset.model) }
-        return (defaults.string(forKey: SettingsKey.customBaseURL) ?? "", defaults.string(forKey: SettingsKey.customModel) ?? "")
-    }
-
     private func transcribe(_ audio: URL) async throws -> TranscriptionResult {
-        let engine = currentEngine
-        let raw: String
-        var provider: String?
-        switch engine {
-        case .onDevice:
-            raw = try await AppleSpeechTranscriber().transcribe(audio)
-        case .cloud:
-            let preset = currentPreset
-            let key = APIKeyStore.read(provider: preset.id)
-            if preset.requiresKey, key == nil { throw FlowError.missingAPIKey }
-            let endpoint = cloudEndpoint
-            raw = try await CloudTranscriber(baseURL: endpoint.baseURL, model: endpoint.model, apiKey: key).transcribe(audio)
-            provider = preset.id
-        }
-        let heard = TranscriptText.clean(raw) ?? ""
-        return TranscriptionResult(text: await cleanUp(heard), raw: heard, engine: engine, provider: provider)
+        let heard = try await EngineSettings.transcribe(audio)
+        return TranscriptionResult(text: await cleanUp(heard.text), raw: heard.text, engine: heard.engine, provider: heard.provider)
     }
 
     private func cleanUp(_ text: String) async -> String {
         guard !text.isEmpty else { return text }
-        let mode = CleanupMode(rawValue: defaults.string(forKey: SettingsKey.cleanupMode) ?? "") ?? .light
+        let mode = EngineSettings.cleanupMode
         guard mode != .off else { return text }
         let light = LightCleanup.clean(text)
-        guard mode == .ai, let cleaner = aiCleaner(),
-              let polished = try? await cleaner.clean(light),
+        guard mode == .ai, let model = EngineSettings.languageModel(),
+              let polished = try? await model.respond(instructions: CleanupGuard.instructions, prompt: light),
               CleanupGuard.isSafe(original: text, cleaned: polished)
         else { return light }
         return polished.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Apple Intelligence on this Mac when available; otherwise the chat model set for the cloud provider.
-    private func aiCleaner() -> TextCleaner? {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *), AppleIntelligenceCleaner.isAvailable {
-            return AppleIntelligenceCleaner()
-        }
-        #endif
-        let model = defaults.string(forKey: SettingsKey.cleanupModel)?.trimmingCharacters(in: .whitespaces) ?? ""
-        guard !model.isEmpty else { return nil }
-        let preset = currentPreset
-        return CloudChatCleaner(baseURL: cloudEndpoint.baseURL, model: model, apiKey: APIKeyStore.read(provider: preset.id))
-    }
-
-    static var appleIntelligenceAvailable: Bool {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) { return AppleIntelligenceCleaner.isAvailable }
-        #endif
-        return false
     }
 
     // MARK: - Helpers

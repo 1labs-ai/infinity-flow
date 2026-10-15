@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Privacy strings for both builds. Xcode merges this with its generated Info.plist; scripts/build-app.sh adds the bundle keys. -->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Infinity Flow listens while you hold the hotkey, or while it takes meeting notes, and turns speech into text.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Infinity Flow uses on-device speech recognition to transcribe what you say.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Infinity Flow records your Mac's audio while it takes meeting notes, so the notes include everyone on the call.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Infinity Flow names your meeting notes after the calendar event happening now, if you turn this on.</string>
+</dict>
+</plist>

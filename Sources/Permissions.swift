@@ -31,6 +31,11 @@ enum Permissions {
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
+    /// Privacy & Security › Screen & System Audio Recording, where "System Audio Recording Only" is allowed.
+    static func openSystemAudioSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!)
+    }
+
     static func openKeyboardSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!)
     }

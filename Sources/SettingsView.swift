@@ -13,7 +13,10 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.playSounds) private var playSounds = true
     @AppStorage(SettingsKey.restoreClipboard) private var restoreClipboard = true
     @AppStorage(SettingsKey.showInDock) private var showInDock = true
-    @Query private var transcripts: [Transcript]
+    private var _transcripts = Query<Transcript, [Transcript]>()
+    private var transcripts: [Transcript] { _transcripts.wrappedValue }
+    private var _meetings = Query<Meeting, [Meeting]>()
+    private var meetings: [Meeting] { _meetings.wrappedValue }
     @State private var apiKey = ""
     @State private var testResult: String?
     @State private var testing = false
@@ -66,7 +69,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
                 if cleanupMode == CleanupMode.ai.rawValue {
-                    if FlowController.appleIntelligenceAvailable {
+                    if EngineSettings.appleIntelligenceAvailable {
                         Label("Uses Apple Intelligence on this Mac. Text never leaves your Mac.", systemImage: "lock.shield")
                             .font(.callout).foregroundStyle(.secondary)
                     } else {
@@ -79,10 +82,12 @@ struct SettingsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
 
+            MeetingsSettingsSection()
+
             RecordingsSection()
 
             Section("Privacy") {
-                PrivacyReceipt(records: transcripts.map(\.usage))
+                PrivacyReceipt(records: transcripts.map(\.usage) + meetings.map(\.privacyRecord))
                 Text("Infinity Flow never takes screenshots and never reads other apps' content. It only sees the name of the app you dictate into, for your History.")
                     .font(.callout).foregroundStyle(.secondary)
             }
@@ -128,7 +133,7 @@ struct SettingsView: View {
             Spacer()
             if let page = preset.keyPage { Link("Get a key", destination: page) }
         }
-        CostMeter(records: transcripts.map(\.usage), preset: preset)
+        CostMeter(records: transcripts.map(\.usage) + meetings.flatMap(\.usage), preset: preset)
     }
 
     private func test() async {
@@ -142,8 +147,81 @@ struct SettingsView: View {
     }
 }
 
+private struct MeetingsSettingsSection: View {
+    @AppStorage(SettingsKey.detectMeetings) private var detectMeetings = true
+    @AppStorage(SettingsKey.stopWhenCallEnds) private var stopWhenCallEnds = true
+    @AppStorage(SettingsKey.meetingEchoCancellation) private var echoCancellation = true
+    @AppStorage(SettingsKey.meetingLength) private var length = MeetingLength.threeHours.rawValue
+    @AppStorage(SettingsKey.meetingCalendar) private var useCalendar = false
+    @AppStorage(SettingsKey.cleanupModel) private var chatModel = ""
+    @State private var calendarDenied = false
+    @State private var usage = MeetingStore.usage()
+
+    var body: some View {
+        Section {
+            Toggle("Offer to take notes when a call starts", isOn: $detectMeetings)
+            Text("Infinity Flow notices when Zoom, Teams, Meet in your browser, FaceTime, Slack or another call app starts using your microphone. It never reads what's on your screen.")
+                .font(.callout).foregroundStyle(.secondary)
+            Toggle("Stop taking notes when the call ends", isOn: $stopWhenCallEnds)
+            Toggle("Cancel echo from your speakers", isOn: $echoCancellation)
+            Text("Keeps other people's voices, playing through your speakers, out of your own track. Not needed with headphones.")
+                .font(.callout).foregroundStyle(.secondary)
+            Picker("Stop recording after", selection: $length) {
+                ForEach(MeetingLength.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Toggle("Name meetings from my calendar", isOn: $useCalendar)
+                .onChange(of: useCalendar) {
+                    guard useCalendar, !MeetingCalendar.authorized else { return }
+                    Task {
+                        let granted = await MeetingCalendar.requestAccess()
+                        calendarDenied = !granted
+                        if !granted { useCalendar = false }
+                    }
+                }
+            if calendarDenied {
+                Text("Calendar access was denied. Allow it in System Settings › Privacy & Security › Calendars.")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            notesModel
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Hear other participants").fontWeight(.medium)
+                    Text("Allow Infinity Flow under System Audio Recording so your notes include everyone on the call. macOS asks the first time you take notes.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open Settings") { Permissions.openSystemAudioSettings() }
+            }
+            LabeledContent("Meeting audio on this Mac") {
+                Text("\(usage.count) parts · \(ByteCountFormatter.string(fromByteCount: usage.bytes, countStyle: .file))")
+            }
+            Button("Open Meetings Folder") { NSWorkspace.shared.open(MeetingStore.folder) }
+        } header: {
+            Text("Meetings")
+        } footer: {
+            Text("Meetings are transcribed with the engine above, in short parts while you talk. Meeting audio follows the recordings settings below.")
+        }
+        .onAppear { usage = MeetingStore.usage() }
+    }
+
+    @ViewBuilder
+    private var notesModel: some View {
+        if EngineSettings.appleIntelligenceAvailable {
+            Label("Summaries and answers use Apple Intelligence on this Mac. Text never leaves your Mac.", systemImage: "lock.shield")
+                .font(.callout).foregroundStyle(.secondary)
+        } else {
+            TextField("Chat model for summaries (with your cloud key)", text: $chatModel, prompt: Text("e.g. llama-3.3-70b-versatile or gpt-4o-mini"))
+            Text(chatModel.trimmed.isEmpty
+                 ? "Apple Intelligence isn't available on this Mac. Add a chat model to get summaries, action items and answers; you'll still get a transcript without one."
+                 : "The meeting transcript is sent to \(EngineSettings.preset.title) with your key to write notes. The same model is used for AI polish.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
 private struct RecordingsSection: View {
     @Environment(FlowController.self) private var controller
+    @Environment(MeetingController.self) private var meetings
     @AppStorage(SettingsKey.keepRecordings) private var keepRecordings = true
     @AppStorage(SettingsKey.recordingRetention) private var retention = RecordingRetention.forever.rawValue
     @State private var usage = Store.recordingsUsage()
@@ -158,6 +236,7 @@ private struct RecordingsSection: View {
             .disabled(!keepRecordings)
             .onChange(of: retention) {
                 controller.applyRecordingRetention()
+                meetings.applyRetention()
                 usage = Store.recordingsUsage()
             }
             LabeledContent("On this Mac") {
@@ -195,9 +274,9 @@ private struct CostMeter: View {
         let minutes = month.reduce(0) { $0 + $1.duration } / 60
         LabeledContent("This month") {
             if let cost = Usage.estimatedCost(month, preset: preset) {
-                Text("\(month.count) dictations · \(String(format: "%.1f", minutes)) min · about \(Usage.formatCost(cost))")
+                Text("\(String(format: "%.1f", minutes)) min of audio · about \(Usage.formatCost(cost))")
             } else {
-                Text("\(month.count) dictations · \(String(format: "%.1f", minutes)) min")
+                Text("\(String(format: "%.1f", minutes)) min of audio")
             }
         }
     }

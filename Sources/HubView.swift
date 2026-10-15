@@ -4,6 +4,7 @@ import SwiftUI
 enum HubSection: String, CaseIterable, Identifiable {
     case home = "Home"
     case history = "History"
+    case meetings = "Meetings"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -12,12 +13,15 @@ enum HubSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: "house"
         case .history: "clock.arrow.circlepath"
+        case .meetings: "person.2.wave.2"
         case .settings: "gearshape"
         }
     }
 }
 
 struct HubView: View {
+    @Environment(MeetingController.self) private var meetings
+    @Environment(\.openWindow) private var openWindow
     @State private var section: HubSection? = .home
     @AppStorage(SettingsKey.onboarded) private var onboarded = false
 
@@ -31,9 +35,15 @@ struct HubView: View {
             switch section ?? .home {
             case .home: HomeView()
             case .history: HistoryView()
+            case .meetings: MeetingsView()
             case .settings: SettingsView()
             }
         }
+        .onAppear {
+            AppWindows.openHub = { [openWindow] in openWindow(id: "hub") }
+            if meetings.requestedMeeting != nil { section = .meetings }
+        }
+        .onChange(of: meetings.requestedMeeting) { if meetings.requestedMeeting != nil { section = .meetings } }
         .sheet(isPresented: Binding(get: { !onboarded }, set: { if !$0 { onboarded = true } })) {
             OnboardingView { onboarded = true }
         }
@@ -42,7 +52,10 @@ struct HubView: View {
 
 struct HomeView: View {
     @Environment(FlowController.self) private var controller
-    @Query private var transcripts: [Transcript]
+    private var _transcripts = Query<Transcript, [Transcript]>()
+    private var transcripts: [Transcript] { _transcripts.wrappedValue }
+    private var _meetings = Query<Meeting, [Meeting]>()
+    private var meetings: [Meeting] { _meetings.wrappedValue }
     @AppStorage(SettingsKey.hotkey) private var hotkey = Hotkey.fn.rawValue
 
     private var words: Int { transcripts.reduce(0) { $0 + TranscriptText.wordCount($1.text) } }
@@ -62,7 +75,7 @@ struct HomeView: View {
                     Stat(value: "\(transcripts.count)", label: "Dictations")
                     Stat(value: minutes < 1 ? "<1" : String(format: "%.0f", minutes), label: "Minutes spoken")
                 }
-                PrivacyReceipt(records: transcripts.map(\.usage))
+                PrivacyReceipt(records: transcripts.map(\.usage) + meetings.map(\.privacyRecord))
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 14).fill(.quaternary.opacity(0.5)))
@@ -108,7 +121,8 @@ private struct SetupCard: View {
 
 struct HistoryView: View {
     @Environment(FlowController.self) private var controller
-    @Query(sort: \Transcript.createdAt, order: .reverse) private var transcripts: [Transcript]
+    private var _transcripts = Query<Transcript, [Transcript]>(sort: \Transcript.createdAt, order: .reverse)
+    private var transcripts: [Transcript] { _transcripts.wrappedValue }
     @State private var search = ""
     @State private var pendingDelete: Transcript?
 

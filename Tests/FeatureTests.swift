@@ -51,7 +51,7 @@ final class FeatureTests: XCTestCase {
         XCTAssertEqual(summary.onDeviceCount, 2)
         XCTAssertEqual(summary.onDeviceMinutes, 3, accuracy: 1e-9)
         XCTAssertEqual(summary.headline, "No audio left this Mac.")
-        XCTAssertEqual(PrivacySummary(records).headline, "1 of 3 dictations were sent to Groq with your key.")
+        XCTAssertEqual(PrivacySummary(records).headline, "1 of 3 recordings were sent to Groq with your key.")
     }
 
     // MARK: - Cleanup

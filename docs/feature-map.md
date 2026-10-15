@@ -243,7 +243,38 @@ Mouse buttons are 4098–4105 (middle and buttons 4–10) plus aux 65535.
   "Is your microphone muted?" and "We didn't hear you clearly.".
 - INFERRED: formatting and filler removal happen server-side (an LLM formatting step), because no client-side formatter rules were found. A replica needs its own choice here, such as local ASR plus optional LLM cleanup.
 
-## 10. Open gaps
+## 10. Meeting notes ("Notetaker")
+Sources for this section: the Sequelize migrations shipped as plain files in `Resources/migrations/` (**MIG:**name), and exact English strings
+from plain reads of `renderer/meeting_recorder/index.js` and `renderer/hub/index.js` (**STR**). Nothing was executed and no user data was read.
+- OBSERVED, data model: a `Meetings` table (MIG:20260410120000-create-meetings-table) later gains `summary`, `notes` (editor JSON for your own notes),
+  `speakerMap` (`{ people, assignments }`), `participantNames`, `calendarEventExternalId`, `endedAt`, `recordedMs` and refine/upload state
+  (MIG:20260702120000-add-meetings-notes-summary, 20260702120000-add-meetings-speaker-map, 20260616120000-add-meetings-ended-at, 20260915120000-add-meetings-recorded-ms).
+  Action items live in a `Todos` table with an optional `meetingId` and `open` status (MIG:20260605120000-create-todos-table).
+  "Ask about a meeting" chats are stored in `NotetakerChats` / `NotetakerChatMessages` (MIG:20260715120000-create-notetaker-chat-tables).
+  Calendar events are cached with reminder state (MIG:20260427120000-create-calendar-events-table), and meetings can be filed into shared `Folders`.
+- OBSERVED, capture: the mic and the Mac's audio are captured separately ("Meeting mic capture active", "Meeting system capture active",
+  "Capture meeting audio for accurate transcripts", "Allow Wispr Flow under System Audio Recording in System Settings",
+  "Notetaker uses this to transcribe the other participants in your meetings"). It needs macOS 13 or later ("Notetaker needs macOS 13 or later to record meetings").
+- OBSERVED, while recording: a live transcript ("Show live transcript", "Live transcripts"), your own notes ("Take your own notes here"),
+  pause and resume ("Stop Notetaker for the current recording? You can resume it later."), and discard ("Discard this meeting?", "MeetingStartedByMistake").
+- OBSERVED, starting and stopping: call detection ("Meeting detected", "Transcribe this meeting with Wispr?",
+  "Notetaker asks if you want to start a note when you join a call"), "Start Notetaker when a meeting begins", "Stop Notetaker when a call ends",
+  a maximum length ("Notetaker stops automatically at this length, with a warning shortly before"), check-ins ("Meeting still going?"),
+  and sleep handling ("Notetaker stopped when your Mac went to sleep").
+- OBSERVED, afterwards: "Meeting complete! Your summary will be ready shortly", summary sections and action items ("Action items", "Add action item"),
+  speaker naming ("Assign speaker names", "Speaker labels"), "Ask anything about this meeting", "Copy meeting to Markdown", "Copy summary",
+  "Copy transcript", "Rerun meeting?" ("This will replace the transcript and summary using the saved audio."), "Delete meeting?",
+  transcript retention ("Notetaker transcript retention"), and search ("Search your meetings").
+- OBSERVED, server side: summaries come from the backend (`POST /api/v1/calendar/meetings/{id}/post-meeting`, MIG:20260510120000-add-summary-columns),
+  and the refined transcript arrives through a Soniox webhook (MIG:20260512120000-add-meetings-refinement-columns). Calendar comes from Google or Outlook
+  through Wispr's servers.
+- Infinity Flow's version (clean-room, local): two tracks (mic with echo cancellation, system audio through a Core Audio process tap) cut into chunks at
+  pauses and transcribed while you talk with the engine chosen in Settings; "You" and "Others" as speakers, renamable; notes, summary, action items and
+  answers from Apple Intelligence on the Mac or a chat model with your own key; call detection from which apps are using the microphone (Core Audio
+  process list, no screen reading); optional titles from the macOS calendar (EventKit). Not built: server sync, shared folders, Google/Outlook
+  integrations, per-person speaker diarization, and meeting reminders.
+
+## 11. Open gaps
 - UNKNOWN: exact pill pixel size, corner radius and colours (hashed CSS), the start/stop sound trigger sites, the exact paste keystroke API (CGEvent vs AppleScript),
   the failed-paste timeout value, the Globe-key conflict handling, and the full Flow Bar menu order.
 - Coverage limits: REA-A did not run semantic analysis on main, status or overlay, so their behaviour comes from plain reads of the extracted bundle. Nothing was executed.

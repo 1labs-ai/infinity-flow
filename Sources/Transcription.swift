@@ -124,3 +124,71 @@ struct CloudTranscriber: Transcriber {
         return (try? JSONDecoder().decode(Failure.self, from: data))?.error.message ?? "The server returned HTTP \(status)."
     }
 }
+
+/// The engine, provider and chat model chosen in Settings. Dictation and meeting notes both read them from here.
+enum EngineSettings {
+    private static var defaults: UserDefaults { .standard }
+
+    static var engine: TranscriptionEngine {
+        TranscriptionEngine(rawValue: defaults.string(forKey: SettingsKey.engine) ?? "") ?? .onDevice
+    }
+
+    static var preset: CloudPreset {
+        CloudPreset.preset(id: defaults.string(forKey: SettingsKey.cloudPreset))
+    }
+
+    /// The base URL and model for the selected cloud preset; Custom reads them from Settings.
+    static var cloudEndpoint: (baseURL: String, model: String) {
+        let preset = preset
+        guard preset == .custom else { return (preset.baseURL, preset.model) }
+        return (defaults.string(forKey: SettingsKey.customBaseURL) ?? "", defaults.string(forKey: SettingsKey.customModel) ?? "")
+    }
+
+    static var cleanupMode: CleanupMode {
+        CleanupMode(rawValue: defaults.string(forKey: SettingsKey.cleanupMode) ?? "") ?? .light
+    }
+
+    struct Heard {
+        /// Whitespace-normalized text, or "" when nothing was said.
+        let text: String
+        let engine: TranscriptionEngine
+        /// Cloud preset ID, or `nil` when transcribed on this Mac.
+        let provider: String?
+    }
+
+    /// Transcribes with the engine chosen in Settings. No cleanup is applied.
+    static func transcribe(_ audio: URL) async throws -> Heard {
+        let engine = engine
+        switch engine {
+        case .onDevice:
+            let raw = try await AppleSpeechTranscriber().transcribe(audio)
+            return Heard(text: TranscriptText.clean(raw) ?? "", engine: engine, provider: nil)
+        case .cloud:
+            let preset = preset
+            let key = APIKeyStore.read(provider: preset.id)
+            if preset.requiresKey, key == nil { throw FlowError.missingAPIKey }
+            let endpoint = cloudEndpoint
+            let raw = try await CloudTranscriber(baseURL: endpoint.baseURL, model: endpoint.model, apiKey: key).transcribe(audio)
+            return Heard(text: TranscriptText.clean(raw) ?? "", engine: engine, provider: preset.id)
+        }
+    }
+
+    /// Apple Intelligence on this Mac when available; otherwise the chat model set for the cloud provider, if any.
+    static func languageModel(timeout: TimeInterval = 30) -> LanguageModel? {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *), AppleIntelligenceModel.isAvailable {
+            return AppleIntelligenceModel()
+        }
+        #endif
+        let model = defaults.string(forKey: SettingsKey.cleanupModel)?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard !model.isEmpty else { return nil }
+        return CloudChatModel(baseURL: cloudEndpoint.baseURL, model: model, apiKey: APIKeyStore.read(provider: preset.id), timeout: timeout)
+    }
+
+    static var appleIntelligenceAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) { return AppleIntelligenceModel.isAvailable }
+        #endif
+        return false
+    }
+}

@@ -42,6 +42,21 @@ We read user reviews and comments about popular AI dictation apps and built Infi
 - **Privacy receipt** and a **monthly cost meter** for your cloud key.
 - **Dock or menu bar:** shows in the Dock by default; turn that off in Settings to keep it in the menu bar only.
 
+### Meeting notes
+
+- **Records the whole call:** your mic and your Mac's audio as two tracks, so the notes include everyone on Zoom, Meet, Teams, FaceTime or Slack.
+  Echo cancellation keeps the call out of your own track when you use speakers. No bot joins your call.
+- **Live transcript:** speech is cut into short parts at natural pauses and transcribed while you talk, with the engine you chose.
+  Speakers are "You" and "Others" (or the attendee's name); rename them in the transcript. Play any part back.
+- **Notes when it ends:** a title, a one-line summary, topic notes and a checklist of action items, written by Apple Intelligence on your Mac
+  or a chat model with your own key. Your own notes from the My notes tab are included. Long meetings are summarized part by part.
+- **Ask anything about a meeting:** "What did we decide?" answers come from that meeting's notes and transcript.
+- **Starts and stops for you:** offers to take notes when a call app starts using the mic, stops when the call ends, at a length limit
+  (with a warning), or when your Mac sleeps. Pause, resume or discard from the floating recorder or the menu bar.
+- **Never loses a meeting:** every part is saved before it is transcribed, failed parts can be retried, and a meeting cut short by a quit or crash
+  is finished at the next launch.
+- **Copy as Markdown**, search across all meetings, and optional titles and attendees from your macOS calendar.
+
 ## Bring your own key
 
 | Provider | Model | Price (Oct 2026, check the provider's site) |
@@ -62,6 +77,19 @@ on-device engine for those.
 
 ## Build and run
 
+### Without Xcode
+
+With only the Command Line Tools (`xcode-select --install`):
+
+```bash
+./scripts/build-app.sh
+```
+
+This builds the Swift package, wraps it into `build/Infinity Flow.app` (icon, Info.plist, ad-hoc signature) and opens it.
+Set `SIGN_IDENTITY` to an Apple Development certificate to keep permissions across rebuilds. The tests need Xcode.
+
+### With Xcode
+
 ```bash
 xcodegen generate
 xcodebuild -project InfinityFlow.xcodeproj -scheme InfinityFlow -derivedDataPath build test
@@ -74,7 +102,8 @@ you rebuild (ad-hoc builds lose it every time):
 SIGN_IDENTITY="Apple Development: Your Name (XXXXXXXXXX)" TEAM_ID=ABCDE12345 ./scripts/run.sh
 ```
 
-On first launch, allow **Microphone**, **Speech Recognition**, and **Accessibility**. If you use fn, set
+On first launch, allow **Microphone**, **Speech Recognition**, and **Accessibility**. The first time you take meeting notes, macOS asks to
+allow **System Audio Recording** so the notes include the other people on the call. If you use fn, set
 System Settings › Keyboard › "Press 🌐 key to" to "Do Nothing". If Accessibility is switched on but Infinity Flow still
 asks for it, run `tccutil reset Accessibility com.oneinfinitylabs.InfinityFlow` and allow it again.
 
@@ -92,6 +121,10 @@ asks for it, run `tccutil reset Accessibility com.oneinfinitylabs.InfinityFlow` 
 | `Sources/AudioRecorder.swift`, `AudioPlayback.swift` | 16 kHz WAV capture with live levels; playback from History |
 | `Sources/FlowPill.swift` | Floating, non-activating recording pill |
 | `Sources/HubView.swift`, `SettingsView.swift` | Home, History, Settings and onboarding |
+| `Sources/MeetingController.swift` | Meeting notes: recording, the transcription queue, AI notes, questions, call detection, recovery |
+| `Sources/MeetingAudio.swift` | Mic and system-audio capture, and the chunk writer |
+| `Sources/MeetingLogic.swift` | Chunking rules, notes parsing, Markdown export, context for questions |
+| `Sources/MeetingModels.swift`, `MeetingsView.swift`, `MeetingPanel.swift` | Meeting storage, the Meetings screen and the floating recorder |
 | `Tests/` | Unit tests for the logic |
 | `docs/feature-map.md` | Behavior map of the app we modeled, from static analysis |
 | `docs/marketing.md` | Positioning and launch copy |

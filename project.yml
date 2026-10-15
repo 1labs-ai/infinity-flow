@@ -22,11 +22,10 @@ targets:
         PRODUCT_MODULE_NAME: InfinityFlow
         PRODUCT_BUNDLE_IDENTIFIER: com.oneinfinitylabs.InfinityFlow
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Support/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Infinity Flow
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: Infinity Flow listens while you hold the hotkey and turns your speech into text.
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Infinity Flow uses on-device speech recognition to transcribe what you say.
         ENABLE_HARDENED_RUNTIME: NO
   InfinityFlowTests:
     type: bundle.unit-test
