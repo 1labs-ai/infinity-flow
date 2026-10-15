@@ -5,6 +5,139 @@ struct TimedText: Codable, Equatable {
     var start: Double
     var end: Double
     var text: String
+    /// Who said it, for the call track: a name the conversation revealed, or "Speaker 1", "Speaker 2"…
+    var speaker: String? = nil
+    /// The voice's median pitch in Hz, a cue for telling people apart.
+    var pitch: Double? = nil
+}
+
+/// Works out who on the call said each line, from the conversation and voice pitch, with a language model.
+/// Lines are sent in windows small enough for the model, carrying the speakers found so far.
+enum SpeakerAssignment {
+    static let instructions = """
+        You work out who said each line of a meeting transcript made by speech recognition. "You" is the person who \
+        recorded the meeting and is already labeled. The numbered lines come from one or more other people on the call; \
+        label each with who said it. Use a person's name only when the conversation makes it clear: they introduce \
+        themselves, someone addresses them by name and they answer, or they are named as the one doing what they \
+        said. Otherwise use "Speaker 1", "Speaker 2" and so on, the same label for the same person throughout. \
+        A question and its answer are different people; someone continuing their own point is the same person. \
+        Voice pitch is given in Hz: values within about 25 Hz are probably the same voice, very different values are \
+        different people. Before using a new "Speaker N", check whether the line's pitch matches someone you already \
+        named; if it does, it is almost certainly that person speaking again. Lines may be in English, Hindi or both. Reply with one line per numbered line, in the form \
+        "12: Rahul", and nothing else.
+        """
+
+    struct Line {
+        let id: Int
+        let isYou: Bool
+        let text: String
+        let pitch: Double?
+    }
+
+    /// Windows of lines for the model, each at most `budget` characters.
+    static func windows(_ lines: [Line], budget: Int) -> [[Line]] {
+        var windows: [[Line]] = []
+        var current: [Line] = []
+        var size = 0
+        for line in lines {
+            let cost = line.text.count + 30
+            if !current.isEmpty, size + cost > budget {
+                windows.append(current)
+                current = []
+                size = 0
+            }
+            current.append(line)
+            size += cost
+        }
+        if !current.isEmpty { windows.append(current) }
+        return windows
+    }
+
+    static func prompt(_ window: [Line], attendees: [String], known: [String: Double?]) -> String {
+        var prompt = ""
+        if !attendees.isEmpty { prompt += "Invited to the meeting: \(attendees.joined(separator: ", "))\n" }
+        if !known.isEmpty {
+            let list = known.keys.sorted().map { name in
+                if let pitch = known[name] ?? nil { return "\(name) (about \(Int(pitch)) Hz)" }
+                return name
+            }
+            prompt += "Speakers identified earlier in this meeting: \(list.joined(separator: ", "))\n"
+        }
+        prompt += "\nTranscript:\n"
+        for line in window {
+            if line.isYou {
+                prompt += "You: \(line.text)\n"
+            } else {
+                let pitch = line.pitch.map { " (voice \(Int($0)) Hz)" } ?? ""
+                prompt += "\(line.id)\(pitch): \(line.text)\n"
+            }
+        }
+        return prompt
+    }
+
+    /// Merges an unnamed "Speaker N" into a named person whose voice clearly matches: median pitch within 15 Hz,
+    /// and nobody else within 30 Hz. Returns the renames.
+    static func mergeByVoice(_ pitches: [String: [Double]]) -> [String: String] {
+        func median(_ values: [Double]) -> Double? { values.isEmpty ? nil : values.sorted()[values.count / 2] }
+        let named = pitches.filter { !isPlaceholder($0.key) }.compactMapValues(median)
+        var renames: [String: String] = [:]
+        for (label, values) in pitches where isPlaceholder(label) {
+            guard let pitch = median(values) else { continue }
+            let distances = named.map { (name: $0.key, distance: abs($0.value - pitch)) }.sorted { $0.distance < $1.distance }
+            guard let best = distances.first, best.distance <= 15, distances.dropFirst().allSatisfy({ $0.distance > 30 }) else { continue }
+            renames[label] = best.name
+        }
+        return renames
+    }
+
+    static func isPlaceholder(_ label: String) -> Bool {
+        label.range(of: #"^Speaker \d+$"#, options: .regularExpression) != nil
+    }
+
+    /// Reads "12: Rahul" lines. Labels are trimmed of quotes and stray punctuation.
+    static func parse(_ reply: String) -> [Int: String] {
+        var labels: [Int: String] = [:]
+        for raw in reply.components(separatedBy: .newlines) {
+            let line = raw.replacingOccurrences(of: "*", with: "").trimmingCharacters(in: .whitespaces)
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let number = line[..<colon].trimmingCharacters(in: CharacterSet(charactersIn: "[]# ").union(.whitespaces))
+            let label = line[line.index(after: colon)...].trimmingCharacters(in: CharacterSet(charactersIn: "\"'.,").union(.whitespaces))
+            guard let id = Int(number), !label.isEmpty, label.count <= 40, label.lowercased() != "you" else { continue }
+            labels[id] = label
+        }
+        return labels
+    }
+}
+
+/// Estimates the pitch of a voice, to help tell the people on a call apart.
+enum PitchEstimator {
+    /// The median pitch (Hz) of the voiced 40 ms frames, or `nil` when there's too little voice.
+    static func medianPitch(_ samples: [Float], sampleRate: Double) -> Double? {
+        let frame = Int(sampleRate * 0.04)
+        guard frame > 0, samples.count >= frame else { return nil }
+        let minLag = Int(sampleRate / 400), maxLag = min(Int(sampleRate / 70), frame - 1)
+        var pitches: [Double] = []
+        var index = 0
+        // About 30 frames per sentence is plenty for a median, and keeps long meetings fast.
+        let hop = max(frame / 2, (samples.count - frame) / 30)
+        while index + frame <= samples.count {
+            let window = Array(samples[index..<(index + frame)])
+            index += hop
+            let energy = window.reduce(0) { $0 + $1 * $1 }
+            guard energy / Float(frame) > 1e-4 else { continue } // silence
+            var bestLag = 0
+            var best: Float = 0
+            for lag in minLag...maxLag {
+                var sum: Float = 0
+                for i in 0..<(frame - lag) { sum += window[i] * window[i + lag] }
+                if sum > best { best = sum; bestLag = lag }
+            }
+            // Voiced frames repeat strongly at their period.
+            if bestLag > 0, best / energy > 0.5 { pitches.append(sampleRate / Double(bestLag)) }
+        }
+        guard pitches.count >= 3 else { return nil }
+        return pitches.sorted()[pitches.count / 2]
+    }
 }
 
 /// A sentence of one track, placed on the meeting's timeline.
@@ -15,6 +148,9 @@ struct TrackLine: Equatable {
     let text: String
     /// The part (and audio file) it came from.
     var segment: UUID?
+    /// The person on the call who said it, once speakers are identified.
+    var label: String? = nil
+    var pitch: Double? = nil
 
     /// The sentences of a transcribed part. Parts without timestamps are one line.
     static func lines(speaker: MeetingSpeaker, partStart: Double, partDuration: Double, text: String,
@@ -23,7 +159,8 @@ struct TrackLine: Equatable {
             return text.isEmpty ? [] : [TrackLine(speaker: speaker, start: partStart, end: partStart + partDuration, text: text, segment: segment)]
         }
         return timed.map {
-            TrackLine(speaker: speaker, start: partStart + $0.start, end: partStart + $0.end, text: $0.text, segment: segment)
+            TrackLine(speaker: speaker, start: partStart + $0.start, end: partStart + $0.end, text: $0.text, segment: segment,
+                      label: $0.speaker, pitch: $0.pitch)
         }
     }
 

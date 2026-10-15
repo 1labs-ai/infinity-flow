@@ -191,7 +191,28 @@ final class Meeting: ExpandedModel {
                             timed: $0.sentences, segment: $0.uuid)
         }
         return TrackLine.conversation(lines).map {
-            MeetingLine(speaker: name(of: $0.speaker), start: $0.start, text: $0.text, segment: $0.segment)
+            MeetingLine(speaker: $0.speaker == .others ? ($0.label ?? name(of: .others)) : name(of: .you),
+                        start: $0.start, text: $0.text, segment: $0.segment)
+        }
+    }
+
+    /// The people on the call, in the order they first spoke, then invited attendees who didn't speak.
+    var members: [String] {
+        var seen: [String] = []
+        for segment in orderedSegments where segment.meetingSpeaker == .others {
+            for label in (segment.sentences ?? []).compactMap(\.speaker) where !seen.contains(label) { seen.append(label) }
+        }
+        return seen + attendees.filter { !seen.contains($0) }
+    }
+
+    /// Renames one person on the call everywhere in the meeting.
+    func rename(speaker label: String, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != label else { return }
+        for segment in segments ?? [] where segment.meetingSpeaker == .others {
+            guard var sentences = segment.sentences, sentences.contains(where: { $0.speaker == label }) else { continue }
+            for index in sentences.indices where sentences[index].speaker == label { sentences[index].speaker = name }
+            segment.sentences = sentences
         }
     }
 

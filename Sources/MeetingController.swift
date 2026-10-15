@@ -376,9 +376,11 @@ final class MeetingController {
         writingNotes.insert(meeting.uuid)
         defer { writingNotes.remove(meeting.uuid) }
         meeting.notesError = nil
+        // Who said what comes first, so the notes can name owners.
+        await identifySpeakers(in: meeting, model: model)
         do {
             let notes = try await MeetingNotesWriter(model: model, language: notesLanguage)
-                .write(lines: lines, userNotes: meeting.userNotes, attendees: meeting.attendees)
+                .write(lines: meeting.transcriptLines, userNotes: meeting.userNotes, attendees: meeting.members)
             if meeting.calendarTitle == nil, let title = notes.title { meeting.title = title }
             meeting.summary = notes.summary.isEmpty ? nil : notes.summary
             meeting.aiNotes = notes.notes.isEmpty ? nil : notes.notes
@@ -387,6 +389,58 @@ final class MeetingController {
         } catch {
             meeting.notesError = "Couldn't write notes: \(error.localizedDescription)"
         }
+    }
+
+    /// Labels each line from the call with the person who said it (a name the conversation reveals, or
+    /// "Speaker 1"…), using the conversation and each sentence's voice pitch. Lines already named keep their names.
+    func identifySpeakers(in meeting: Meeting, model: LanguageModel) async {
+        let segments = (meeting.segments ?? []).filter { $0.isDone && $0.sentences?.isEmpty == false }
+        guard segments.contains(where: { $0.meetingSpeaker == .others }) else { return }
+        // Measure each call sentence's pitch from its audio, once.
+        for segment in segments where segment.meetingSpeaker == .others {
+            guard var sentences = segment.sentences, sentences.contains(where: { $0.pitch == nil }),
+                  let url = segment.audioURL, let audio = try? AVAudioFileInfo.samples(of: url) else { continue }
+            for index in sentences.indices where sentences[index].pitch == nil {
+                let from = max(0, Int(sentences[index].start * audio.rate)), to = min(audio.samples.count, Int(sentences[index].end * audio.rate))
+                if to > from { sentences[index].pitch = PitchEstimator.medianPitch(Array(audio.samples[from..<to]), sampleRate: audio.rate) }
+            }
+            segment.sentences = sentences
+        }
+        // The conversation as the model sees it, with the call's lines numbered.
+        let conversation = TrackLine.conversation(segments.flatMap {
+            TrackLine.lines(speaker: $0.meetingSpeaker, partStart: $0.start, partDuration: $0.duration, text: $0.text,
+                            timed: $0.sentences, segment: $0.uuid)
+        })
+        let lines = conversation.enumerated().map { index, line in
+            SpeakerAssignment.Line(id: index + 1, isYou: line.speaker == .you, text: line.text, pitch: line.pitch)
+        }
+        var known: [String: Double?] = [:]
+        var labels: [Int: String] = [:]
+        for window in SpeakerAssignment.windows(lines, budget: max(model.promptBudget - 3_000, 2_000)) {
+            guard window.contains(where: { !$0.isYou }) else { continue }
+            let prompt = SpeakerAssignment.prompt(window, attendees: meeting.attendees, known: known)
+            guard let reply = try? await model.respond(instructions: SpeakerAssignment.instructions, prompt: prompt) else { return }
+            for (id, label) in SpeakerAssignment.parse(reply) where window.contains(where: { $0.id == id && !$0.isYou }) {
+                labels[id] = label
+                if known[label] == nil { known[label] = lines[id - 1].pitch }
+            }
+        }
+        guard !labels.isEmpty else { return }
+        // An unnamed speaker whose voice clearly matches a named one is that person.
+        var pitches: [String: [Double]] = [:]
+        for (id, label) in labels { if let pitch = lines[id - 1].pitch { pitches[label, default: []].append(pitch) } }
+        let renames = SpeakerAssignment.mergeByVoice(pitches)
+        labels = labels.mapValues { renames[$0] ?? $0 }
+        // Write the labels back onto the sentences they came from.
+        for (id, label) in labels {
+            let line = conversation[id - 1]
+            guard let segment = segments.first(where: { $0.uuid == line.segment }), var sentences = segment.sentences,
+                  let index = sentences.firstIndex(where: { abs(segment.start + $0.start - line.start) < 0.01 && $0.text == line.text })
+            else { continue }
+            sentences[index].speaker = label
+            segment.sentences = sentences
+        }
+        try? context.save()
     }
 
     static let noModelMessage = "Add a cloud key in Settings to get a summary, action items and answers (Groq's free tier works), or use a Mac with Apple Intelligence."
@@ -428,7 +482,7 @@ final class MeetingController {
     func ask(_ question: String, about meeting: Meeting) async throws -> String {
         guard let model = EngineSettings.meetingModel(timeout: 120) else { throw FlowError.api(Self.noModelMessage) }
         var head = "Meeting: \(meeting.title), \(meeting.createdAt.formatted(date: .abbreviated, time: .shortened))\n"
-        if !meeting.attendees.isEmpty { head += "Attendees: \(meeting.attendees.joined(separator: ", "))\n" }
+        if !meeting.members.isEmpty { head += "People on the call: \(meeting.members.joined(separator: ", "))\n" }
         if let summary = meeting.summary { head += "Summary: \(summary)\n" }
         let items = meeting.orderedActionItems.map { "- \($0.text)\($0.done ? " (done)" : "")" }
         if !items.isEmpty { head += "Action items:\n\(items.joined(separator: "\n"))\n" }
@@ -688,6 +742,17 @@ struct CalendarCandidate: Equatable {
 }
 
 enum AVAudioFileInfo {
+    /// A WAV file's first channel as Float samples, with its sample rate.
+    static func samples(of url: URL) throws -> (samples: [Float], rate: Double) {
+        let file = try AVAudioFile(forReading: url)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else {
+            return ([], file.processingFormat.sampleRate)
+        }
+        try file.read(into: buffer)
+        guard let data = buffer.floatChannelData?[0] else { return ([], file.processingFormat.sampleRate) }
+        return (Array(UnsafeBufferPointer(start: data, count: Int(buffer.frameLength))), file.processingFormat.sampleRate)
+    }
+
     static func duration(of url: URL) throws -> Double {
         let file = try AVAudioFile(forReading: url)
         return Double(file.length) / file.processingFormat.sampleRate
@@ -726,3 +791,4 @@ enum AppWindows {
         NSApp.activate()
     }
 }
+

@@ -77,7 +77,25 @@ enum APIKeyStore {
         ]
     }
 
+    /// Keys read this session. A keychain read can wait on an "allow access" prompt (macOS asks again when the app's
+    /// code changes), so each key is read once, at launch, and kept in memory rather than read for every request.
+    nonisolated(unsafe) private static var cache: [String: String?] = [:]
+    private static let lock = NSLock()
+
     static func read(provider: String) -> String? {
+        if let cached = lock.withLock({ cache[provider] }) { return cached }
+        let key = readFromKeychain(provider: provider)
+        lock.withLock { cache[provider] = key }
+        return key
+    }
+
+    /// Reads the selected provider's key in the background, so a keychain prompt shows when the app opens
+    /// instead of holding up a meeting later.
+    static func preload(provider: String) {
+        DispatchQueue.global(qos: .userInitiated).async { _ = read(provider: provider) }
+    }
+
+    private static func readFromKeychain(provider: String) -> String? {
         var query = query(provider)
         query[kSecReturnData as String] = true
         var result: AnyObject?
@@ -89,6 +107,7 @@ enum APIKeyStore {
     static func save(_ value: String, provider: String) {
         SecItemDelete(query(provider) as CFDictionary)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        lock.withLock { cache[provider] = trimmed.isEmpty ? .some(nil) : trimmed }
         guard !trimmed.isEmpty else { return }
         var add = query(provider)
         add[kSecValueData as String] = Data(trimmed.utf8)
