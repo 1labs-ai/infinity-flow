@@ -3,7 +3,8 @@ import SwiftUI
 
 struct MeetingsView: View {
     @Environment(MeetingController.self) private var meetings
-    @Query(sort: \Meeting.createdAt, order: .reverse) private var all: [Meeting]
+    private var _all = Query<Meeting, [Meeting]>(sort: \Meeting.createdAt, order: .reverse)
+    private var all: [Meeting] { _all.wrappedValue }
     @State private var path: [UUID] = []
     @State private var search = ""
     @State private var pendingDelete: Meeting?

@@ -77,6 +77,19 @@ on-device engine for those.
 
 ## Build and run
 
+### Without Xcode
+
+With only the Command Line Tools (`xcode-select --install`):
+
+```bash
+./scripts/build-app.sh
+```
+
+This builds the Swift package, wraps it into `build/Infinity Flow.app` (icon, Info.plist, ad-hoc signature) and opens it.
+Set `SIGN_IDENTITY` to an Apple Development certificate to keep permissions across rebuilds. The tests need Xcode.
+
+### With Xcode
+
 ```bash
 xcodegen generate
 xcodebuild -project InfinityFlow.xcodeproj -scheme InfinityFlow -derivedDataPath build test

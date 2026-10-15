@@ -1,25 +1,109 @@
 import Foundation
+import Observation
 import SwiftData
 
-@Model
-final class Transcript {
-    var uuid = UUID()
+final class Transcript: ExpandedModel {
+    var uuid: UUID = UUID() {
+        @storageRestrictions(accesses: _$backingData, initializes: _uuid)
+        init { _$backingData.setValue(forKey: \.uuid, to: newValue); _uuid = _SwiftDataNoType() }
+        get { read(\.uuid) }
+        set { write(\.uuid, newValue) }
+    }
+    private var _uuid: _SwiftDataNoType
+
     /// The text that was pasted (after cleanup).
-    var text: String
+    var text: String {
+        @storageRestrictions(accesses: _$backingData, initializes: _text)
+        init { _$backingData.setValue(forKey: \.text, to: newValue); _text = _SwiftDataNoType() }
+        get { read(\.text) }
+        set { write(\.text, newValue) }
+    }
+    private var _text: _SwiftDataNoType
+
     /// What was heard before cleanup, kept when cleanup changed it.
-    var rawText: String?
-    var createdAt: Date
-    var duration: Double
-    var engine: String
+    var rawText: String? {
+        @storageRestrictions(accesses: _$backingData, initializes: _rawText)
+        init { _$backingData.setValue(forKey: \.rawText, to: newValue); _rawText = _SwiftDataNoType() }
+        get { read(\.rawText) }
+        set { write(\.rawText, newValue) }
+    }
+    private var _rawText: _SwiftDataNoType
+
+    var createdAt: Date {
+        @storageRestrictions(accesses: _$backingData, initializes: _createdAt)
+        init { _$backingData.setValue(forKey: \.createdAt, to: newValue); _createdAt = _SwiftDataNoType() }
+        get { read(\.createdAt) }
+        set { write(\.createdAt, newValue) }
+    }
+    private var _createdAt: _SwiftDataNoType
+
+    var duration: Double {
+        @storageRestrictions(accesses: _$backingData, initializes: _duration)
+        init { _$backingData.setValue(forKey: \.duration, to: newValue); _duration = _SwiftDataNoType() }
+        get { read(\.duration) }
+        set { write(\.duration, newValue) }
+    }
+    private var _duration: _SwiftDataNoType
+
+    var engine: String {
+        @storageRestrictions(accesses: _$backingData, initializes: _engine)
+        init { _$backingData.setValue(forKey: \.engine, to: newValue); _engine = _SwiftDataNoType() }
+        get { read(\.engine) }
+        set { write(\.engine, newValue) }
+    }
+    private var _engine: _SwiftDataNoType
+
     /// Cloud preset ID when transcribed in the cloud.
-    var provider: String?
+    var provider: String? {
+        @storageRestrictions(accesses: _$backingData, initializes: _provider)
+        init { _$backingData.setValue(forKey: \.provider, to: newValue); _provider = _SwiftDataNoType() }
+        get { read(\.provider) }
+        set { write(\.provider, newValue) }
+    }
+    private var _provider: _SwiftDataNoType
+
     /// The app that was frontmost when dictation started.
-    var appName: String?
+    var appName: String? {
+        @storageRestrictions(accesses: _$backingData, initializes: _appName)
+        init { _$backingData.setValue(forKey: \.appName, to: newValue); _appName = _SwiftDataNoType() }
+        get { read(\.appName) }
+        set { write(\.appName, newValue) }
+    }
+    private var _appName: _SwiftDataNoType
+
     /// "done" or "failed". A failed dictation keeps its audio so it can be retried.
-    var status: String = "done"
-    var audioFileName: String?
-    var errorMessage: String?
-    var pasted: Bool = false
+    var status: String = "done" {
+        @storageRestrictions(accesses: _$backingData, initializes: _status)
+        init { _$backingData.setValue(forKey: \.status, to: newValue); _status = _SwiftDataNoType() }
+        get { read(\.status) }
+        set { write(\.status, newValue) }
+    }
+    private var _status: _SwiftDataNoType
+
+    var audioFileName: String? {
+        @storageRestrictions(accesses: _$backingData, initializes: _audioFileName)
+        init { _$backingData.setValue(forKey: \.audioFileName, to: newValue); _audioFileName = _SwiftDataNoType() }
+        get { read(\.audioFileName) }
+        set { write(\.audioFileName, newValue) }
+    }
+    private var _audioFileName: _SwiftDataNoType
+
+    var errorMessage: String? {
+        @storageRestrictions(accesses: _$backingData, initializes: _errorMessage)
+        init { _$backingData.setValue(forKey: \.errorMessage, to: newValue); _errorMessage = _SwiftDataNoType() }
+        get { read(\.errorMessage) }
+        set { write(\.errorMessage, newValue) }
+    }
+    private var _errorMessage: _SwiftDataNoType
+
+    var pasted: Bool = false {
+        @storageRestrictions(accesses: _$backingData, initializes: _pasted)
+        init { _$backingData.setValue(forKey: \.pasted, to: newValue); _pasted = _SwiftDataNoType() }
+        get { read(\.pasted) }
+        set { write(\.pasted, newValue) }
+    }
+    private var _pasted: _SwiftDataNoType
+
 
     init(text: String, rawText: String? = nil, duration: Double, engine: TranscriptionEngine, provider: String?,
          appName: String?, createdAt: Date = .now) {
@@ -42,7 +126,52 @@ final class Transcript {
     var audioURL: URL? { audioFileName.map { Store.recordingsFolder.appendingPathComponent($0) } }
 
     var usage: UsageRecord { UsageRecord(date: createdAt, duration: duration, provider: provider) }
+
+    // MARK: SwiftData (what `@Model` would generate; see ExpandedModel)
+
+    private var _$backingData: any BackingData<Transcript> = Transcript.createBackingData()
+    let _$observationRegistrar = ObservationRegistrar()
+
+    var persistentBackingData: any BackingData<Transcript> {
+        get { _$backingData }
+        set { _$backingData = newValue }
+    }
+
+    static var schemaMetadata: [Schema.PropertyMetadata] {
+        [
+            Schema.PropertyMetadata(name: "uuid", keypath: \Transcript.uuid, defaultValue: UUID(), metadata: nil),
+            Schema.PropertyMetadata(name: "text", keypath: \Transcript.text, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "rawText", keypath: \Transcript.rawText, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "createdAt", keypath: \Transcript.createdAt, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "duration", keypath: \Transcript.duration, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "engine", keypath: \Transcript.engine, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "provider", keypath: \Transcript.provider, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "appName", keypath: \Transcript.appName, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "status", keypath: \Transcript.status, defaultValue: "done", metadata: nil),
+            Schema.PropertyMetadata(name: "audioFileName", keypath: \Transcript.audioFileName, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "errorMessage", keypath: \Transcript.errorMessage, defaultValue: nil, metadata: nil),
+            Schema.PropertyMetadata(name: "pasted", keypath: \Transcript.pasted, defaultValue: false, metadata: nil),
+        ]
+    }
+
+    required init(backingData: any BackingData<Transcript>) {
+        _uuid = _SwiftDataNoType()
+        _text = _SwiftDataNoType()
+        _rawText = _SwiftDataNoType()
+        _createdAt = _SwiftDataNoType()
+        _duration = _SwiftDataNoType()
+        _engine = _SwiftDataNoType()
+        _provider = _SwiftDataNoType()
+        _appName = _SwiftDataNoType()
+        _status = _SwiftDataNoType()
+        _audioFileName = _SwiftDataNoType()
+        _errorMessage = _SwiftDataNoType()
+        _pasted = _SwiftDataNoType()
+        persistentBackingData = backingData
+    }
 }
+
+extension Transcript: Observable {}
 
 enum Store {
     static let folder: URL = {

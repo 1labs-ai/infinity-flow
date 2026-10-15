@@ -52,8 +52,10 @@ struct HubView: View {
 
 struct HomeView: View {
     @Environment(FlowController.self) private var controller
-    @Query private var transcripts: [Transcript]
-    @Query private var meetings: [Meeting]
+    private var _transcripts = Query<Transcript, [Transcript]>()
+    private var transcripts: [Transcript] { _transcripts.wrappedValue }
+    private var _meetings = Query<Meeting, [Meeting]>()
+    private var meetings: [Meeting] { _meetings.wrappedValue }
     @AppStorage(SettingsKey.hotkey) private var hotkey = Hotkey.fn.rawValue
 
     private var words: Int { transcripts.reduce(0) { $0 + TranscriptText.wordCount($1.text) } }
@@ -119,7 +121,8 @@ private struct SetupCard: View {
 
 struct HistoryView: View {
     @Environment(FlowController.self) private var controller
-    @Query(sort: \Transcript.createdAt, order: .reverse) private var transcripts: [Transcript]
+    private var _transcripts = Query<Transcript, [Transcript]>(sort: \Transcript.createdAt, order: .reverse)
+    private var transcripts: [Transcript] { _transcripts.wrappedValue }
     @State private var search = ""
     @State private var pendingDelete: Transcript?
 

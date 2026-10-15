@@ -13,8 +13,10 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.playSounds) private var playSounds = true
     @AppStorage(SettingsKey.restoreClipboard) private var restoreClipboard = true
     @AppStorage(SettingsKey.showInDock) private var showInDock = true
-    @Query private var transcripts: [Transcript]
-    @Query private var meetings: [Meeting]
+    private var _transcripts = Query<Transcript, [Transcript]>()
+    private var transcripts: [Transcript] { _transcripts.wrappedValue }
+    private var _meetings = Query<Meeting, [Meeting]>()
+    private var meetings: [Meeting] { _meetings.wrappedValue }
     @State private var apiKey = ""
     @State private var testResult: String?
     @State private var testing = false

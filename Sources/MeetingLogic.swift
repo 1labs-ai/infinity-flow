@@ -25,6 +25,11 @@ struct ChunkPolicy {
     private(set) var speech: Double = 0
     private var trailingPause: Double = 0
 
+    init(minimum: Double = 12, maximum: Double = 30) {
+        self.minimum = minimum
+        self.maximum = maximum
+    }
+
     /// Adds `seconds` of audio at `level`. Returns true when the chunk should end after this audio.
     mutating func add(seconds: Double, level: Float) -> Bool {
         length += seconds
